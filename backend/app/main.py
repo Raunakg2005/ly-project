@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import connect_to_mongo, close_mongo_connection
-from app.api import auth, documents, ai
+from app.api import auth, documents, ai, download, bulk_upload
 
 # Lifespan event handler
 @asynccontextmanager
@@ -34,6 +34,8 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(documents.router)
+app.include_router(bulk_upload.router)
+app.include_router(download.router)
 app.include_router(ai.router)
 
 # Health check

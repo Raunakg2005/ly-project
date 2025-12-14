@@ -50,15 +50,40 @@ async def extract_pdf_text(file_content: bytes) -> dict:
 
 async def extract_image_text(file_content: bytes) -> dict:
     """
-    Extract text from image using OCR (placeholder for now)
-    TODO: Implement Tesseract.js or pytesseract
+    Extract text from image using OCR (Tesseract)
     """
-    return {
-        "text": "[OCR not implemented yet - coming soon]",
-        "success": False,
-        "method": "ocr",
-        "error": "OCR extraction not yet implemented"
-    }
+    try:
+        from PIL import Image
+        import pytesseract
+        import io
+        
+        # Open image from bytes
+        image = Image.open(io.BytesIO(file_content))
+        
+        # Perform OCR
+        text = pytesseract.image_to_string(image)
+        
+        # Get confidence data
+        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        confidences = [int(conf) for conf in data['conf'] if conf != '-1']
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+        
+        return {
+            "text": text.strip(),
+            "success": True,
+            "method": "ocr",
+            "confidence": avg_confidence,
+            "language": "eng"  # Default to English
+        }
+    
+    except Exception as e:
+        print(f"OCR Error: {e}")
+        return {
+            "text": "",
+            "success": False,
+            "method": "ocr",
+            "error": str(e)
+        }
 
 async def extract_text(file_content: bytes, file_type: str) -> Optional[str]:
     """
