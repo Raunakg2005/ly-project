@@ -21,7 +21,7 @@ export default function HomePage() {
               Login
             </Link>
             <Link
-              href="/register"
+              href="/login"
               className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-shadow"
             >
               Get Started
