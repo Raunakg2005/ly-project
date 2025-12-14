@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shield, Mail, Lock, User, Loader2 } from 'lucide-react';
-import { api } from '@/lib/api/client';
+import { apiClient } from '@/lib/api/client';
 
 export default function AuthPage() {
     const router = useRouter();
@@ -24,12 +24,12 @@ export default function AuthPage() {
 
         try {
             if (isLogin) {
-                await api.login(formData.email, formData.password);
-                router.push('/upload');
+                await apiClient.login(formData.email, formData.password);
+                window.location.href = '/dashboard';
             } else {
-                await api.register(formData.email, formData.password, formData.name);
-                await api.login(formData.email, formData.password);
-                router.push('/upload');
+                await apiClient.register({ name: formData.name, email: formData.email, password: formData.password });
+                await apiClient.login(formData.email, formData.password);
+                window.location.href = '/dashboard';
             }
         } catch (err: any) {
             setError(err.message || 'Authentication failed');
@@ -39,28 +39,40 @@ export default function AuthPage() {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
-            <div className="w-full max-w-md">
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
+            {/* Grid background */}
+            <div className="absolute inset-0" style={{
+                backgroundImage: `linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px)`,
+                backgroundSize: '50px 50px'
+            }} />
+
+            {/* Gradient blobs */}
+            <div className="absolute top-0 left-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
+
+            <div className="w-full max-w-md relative z-10">
                 {/* Logo */}
                 <div className="text-center mb-8">
-                    <div className="inline-flex items-center gap-2 mb-4">
-                        <Shield className="h-12 w-12 text-blue-600" />
-                        <span className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                    <div className="inline-flex items-center gap-3 mb-4">
+                        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                            <Shield className="h-8 w-8 text-emerald-400" />
+                        </div>
+                        <span className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
                             DocShield
                         </span>
                     </div>
-                    <p className="text-gray-600">Quantum-safe document verification</p>
+                    <p className="text-slate-400">Quantum-safe document verification</p>
                 </div>
 
                 {/* Auth Card */}
-                <div className="bg-white rounded-2xl shadow-xl p-8">
+                <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800/50 rounded-2xl shadow-2xl p-8">
                     {/* Toggle */}
-                    <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
+                    <div className="flex gap-2 mb-6 bg-slate-800/50 p-1 rounded-lg">
                         <button
                             onClick={() => setIsLogin(true)}
                             className={`flex-1 py-2 rounded-lg transition-all ${isLogin
-                                    ? 'bg-white shadow-sm font-medium'
-                                    : 'text-gray-600 hover:text-gray-900'
+                                    ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg font-medium'
+                                    : 'text-slate-400 hover:text-white'
                                 }`}
                         >
                             Login
@@ -68,8 +80,8 @@ export default function AuthPage() {
                         <button
                             onClick={() => setIsLogin(false)}
                             className={`flex-1 py-2 rounded-lg transition-all ${!isLogin
-                                    ? 'bg-white shadow-sm font-medium'
-                                    : 'text-gray-600 hover:text-gray-900'
+                                    ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg font-medium'
+                                    : 'text-slate-400 hover:text-white'
                                 }`}
                         >
                             Register
@@ -80,11 +92,11 @@ export default function AuthPage() {
                     <form onSubmit={handleSubmit} className="space-y-4">
                         {!isLogin && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">
                                     Full Name
                                 </label>
                                 <div className="relative">
-                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
                                     <input
                                         type="text"
                                         required
@@ -92,7 +104,7 @@ export default function AuthPage() {
                                         onChange={(e) =>
                                             setFormData({ ...formData, name: e.target.value })
                                         }
-                                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        className="w-full pl-10 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white placeholder-slate-500"
                                         placeholder="John Doe"
                                     />
                                 </div>
@@ -100,11 +112,11 @@ export default function AuthPage() {
                         )}
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                            <label className="block text-sm font-medium text-slate-300 mb-2">
                                 Email
                             </label>
                             <div className="relative">
-                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
                                 <input
                                     type="email"
                                     required
@@ -112,18 +124,18 @@ export default function AuthPage() {
                                     onChange={(e) =>
                                         setFormData({ ...formData, email: e.target.value })
                                     }
-                                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-full pl-10 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white placeholder-slate-500"
                                     placeholder="you@example.com"
                                 />
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                            <label className="block text-sm font-medium text-slate-300 mb-2">
                                 Password
                             </label>
                             <div className="relative">
-                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
                                 <input
                                     type="password"
                                     required
@@ -131,14 +143,14 @@ export default function AuthPage() {
                                     onChange={(e) =>
                                         setFormData({ ...formData, password: e.target.value })
                                     }
-                                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-full pl-10 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white placeholder-slate-500"
                                     placeholder="••••••••"
                                 />
                             </div>
                         </div>
 
                         {error && (
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600">
+                            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">
                                 {error}
                             </div>
                         )}
@@ -146,7 +158,7 @@ export default function AuthPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white rounded-lg hover:shadow-lg hover:shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
                         >
                             {loading ? (
                                 <>
@@ -160,21 +172,21 @@ export default function AuthPage() {
                     </form>
 
                     {/* Test Credentials */}
-                    <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                        <p className="text-xs text-blue-800 font-medium mb-2">
+                    <div className="mt-6 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                        <p className="text-xs text-emerald-400 font-medium mb-2">
                             🧪 Quick Test Account:
                         </p>
-                        <p className="text-xs text-blue-600 font-mono">
+                        <p className="text-xs text-slate-400 font-mono">
                             Email: test@docshield.com
                         </p>
-                        <p className="text-xs text-blue-600 font-mono">
+                        <p className="text-xs text-slate-400 font-mono">
                             Password: test123
                         </p>
                     </div>
                 </div>
 
                 {/* Footer */}
-                <p className="text-center text-sm text-gray-500 mt-6">
+                <p className="text-center text-sm text-slate-500 mt-6">
                     Powered by Groq AI + Quantum Cryptography
                 </p>
             </div>

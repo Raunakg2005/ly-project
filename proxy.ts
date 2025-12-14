@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth.config';
 
 export default async function middleware(request: NextRequest) {
+    // Disabled session-based auth check since we're using JWT tokens in localStorage
+    // Client-side components will handle auth checks
+    
+    /* 
     const session = await auth();
 
     // Protected routes - require authentication
@@ -15,7 +18,9 @@ export default async function middleware(request: NextRequest) {
         loginUrl.searchParams.set('callbackUrl', request.nextUrl.pathname);
         return NextResponse.redirect(loginUrl);
     }
+    */
 
+    /* 
     // Role-based access control
     if (session?.user) {
         const userRole = session.user.role;
@@ -35,6 +40,7 @@ export default async function middleware(request: NextRequest) {
             return NextResponse.redirect(new URL(`/dashboard/${userRole}`, request.url));
         }
     }
+    */
 
     return NextResponse.next();
 }

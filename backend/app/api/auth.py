@@ -31,6 +31,10 @@ async def register(user: UserCreate):
     result = await db.users.insert_one(user_dict)
     created_user = await db.users.find_one({"_id": result.inserted_id})
     
+    # Convert ObjectId to string
+    if created_user and "_id" in created_user:
+        created_user["_id"] = str(created_user["_id"])
+    
     return created_user
 
 @router.post("/login", response_model=Token)
@@ -83,5 +87,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
+    
+    # Convert ObjectId to string
+    if "_id" in user:
+        user["_id"] = str(user["_id"])
     
     return user
