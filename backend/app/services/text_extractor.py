@@ -85,6 +85,48 @@ async def extract_image_text(file_content: bytes) -> dict:
             "error": str(e)
         }
 
+async def extract_docx_text(file_content: bytes) -> dict:
+    """
+    Extract text from DOCX file
+    """
+    try:
+        from docx import Document
+        import io
+        
+        # Load document from bytes
+        doc = Document(io.BytesIO(file_content))
+        
+        # Extract text from paragraphs
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        full_text = "\n\n".join(paragraphs)
+        
+        # Extract text from tables
+        tables_text = []
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = [cell.text for cell in row.cells]
+                tables_text.append(" | ".join(row_text))
+        
+        if tables_text:
+            full_text += "\n\n" + "\n".join(tables_text)
+        
+        return {
+            "text": full_text.strip(),
+            "success": True,
+            "method": "docx",
+            "paragraph_count": len(paragraphs),
+            "table_count": len(doc.tables)
+        }
+    
+    except Exception as e:
+        print(f"DOCX Error: {e}")
+        return {
+            "text": "",
+            "success": False,
+            "method": "docx",
+            "error": str(e)
+        }
+
 async def extract_text(file_content: bytes, file_type: str) -> Optional[str]:
     """
     Extract text based on file type
@@ -97,6 +139,10 @@ async def extract_text(file_content: bytes, file_type: str) -> Optional[str]:
     
     elif any(img_type in file_type_lower for img_type in ['image', 'jpeg', 'jpg', 'png']):
         result = await extract_image_text(file_content)
+        return result.get("text", "") if result.get("success") else None
+    
+    elif 'word' in file_type_lower or 'document' in file_type_lower or file_type_lower.endswith('.docx'):
+        result = await extract_docx_text(file_content)
         return result.get("text", "") if result.get("success") else None
     
     return None

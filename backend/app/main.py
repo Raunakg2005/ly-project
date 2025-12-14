@@ -3,15 +3,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import connect_to_mongo, close_mongo_connection
-from app.api import auth, documents, ai, download, bulk_upload
+from app.api import auth, documents, ai, download, bulk_upload, verification, batch_verification, manual_review
 
 # Lifespan event handler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     await connect_to_mongo()
+    
+    # Start file cleanup scheduler
+    from app.services.cleanup_scheduler import cleanup_scheduler
+    cleanup_scheduler.start()
+    
     yield
+    
     # Shutdown
+    cleanup_scheduler.stop()
     await close_mongo_connection()
 
 # Create FastAPI app
@@ -36,6 +43,9 @@ app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(bulk_upload.router)
 app.include_router(download.router)
+app.include_router(verification.router)
+app.include_router(batch_verification.router)
+app.include_router(manual_review.router)
 app.include_router(ai.router)
 
 # Health check

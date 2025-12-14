@@ -70,6 +70,22 @@ async def upload_document(
             detail=f"File type not supported. Allowed: PDF, JPG, PNG"
         )
     
+    # Validate file with magic numbers and threat scan
+    from app.services.file_validator import file_validator
+    validation = file_validator.validate_file(file_content, file.content_type)
+    
+    if not validation["valid"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File validation failed: {', '.join(validation['issues'])}"
+        )
+    
+    if validation["security_score"] < 70:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File failed security check (score: {validation['security_score']}/100)"
+        )
+    
     try:
         # Save file and get hash
         file_path, file_hash = await file_manager.save_file(
@@ -84,6 +100,16 @@ async def upload_document(
         # Generate digital signature
         signature = signing_service.sign_hash(file_hash)
         
+        # Generate thumbnail for images
+        thumbnail_path = None
+        if any(img_type in file.content_type.lower() for img_type in ['image', 'jpeg', 'jpg', 'png']):
+            from app.services.thumbnail_generator import thumbnail_generator
+            thumbnail_path = await thumbnail_generator.generate_thumbnail(
+                file_content,
+                file.filename,
+                user_id
+            )
+        
         # Create document record
         document = {
             "userId": ObjectId(user_id),
@@ -92,6 +118,7 @@ async def upload_document(
             "fileSize": file_size,
             "fileType": file.content_type,
             "storageUrl": file_path,
+            "thumbnailUrl": thumbnail_path,
             "fileHash": file_hash,
             "quantumSignature": signature,
             "metadata": {
@@ -103,6 +130,8 @@ async def upload_document(
             "verificationStatus": "pending",
             "verificationCount": 0,
             "downloadCount": 0,
+            "version": 1,
+            "isDeleted": False,
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         }
@@ -137,14 +166,17 @@ async def upload_document(
 async def list_documents(
     user_id: str = Depends(get_current_user_id),
     skip: int = 0,
-    limit: int = 20
+    limit: int = 20,
+    include_deleted: bool = False
 ):
-    """List user's documents"""
+    """List user's documents (excludes deleted by default)"""
     db = get_database()
     
-    cursor = db.documents.find(
-        {"userId": ObjectId(user_id)}
-    ).sort("createdAt", -1).skip(skip).limit(limit)
+    query = {"userId": ObjectId(user_id)}
+    if not include_deleted:
+        query["isDeleted"] = {"$ne": True}
+    
+    cursor = db.documents.find(query).sort("createdAt", -1).skip(skip).limit(limit)
     
     documents = await cursor.to_list(length=limit)
     
@@ -189,9 +221,10 @@ async def get_document(
 @router.delete("/{document_id}")
 async def delete_document(
     document_id: str,
+    hard_delete: bool = False,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Delete document"""
+    """Delete document (soft delete by default)"""
     db = get_database()
     
     # Find document
@@ -206,10 +239,27 @@ async def delete_document(
             detail="Document not found"
         )
     
-    # Delete file from disk
-    file_manager.delete_file(document["storageUrl"])
-    
-    # Delete from database
-    await db.documents.delete_one({"_id": ObjectId(document_id)})
-    
-    return {"success": True, "message": "Document deleted successfully"}
+    if hard_delete:
+        # Hard delete - remove file and database entry
+        file_manager.delete_file(document["storageUrl"])
+        
+        # Delete thumbnail if exists
+        if document.get("thumbnailUrl"):
+            from app.services.thumbnail_generator import thumbnail_generator
+            thumbnail_generator.delete_thumbnail(document["thumbnailUrl"])
+        
+        await db.documents.delete_one({"_id": ObjectId(document_id)})
+        return {"success": True, "message": "Document permanently deleted"}
+    else:
+        # Soft delete - mark as deleted
+        await db.documents.update_one(
+            {"_id": ObjectId(document_id)},
+            {
+                "$set": {
+                    "isDeleted": True,
+                    "deletedAt": datetime.utcnow(),
+                    "updatedAt": datetime.utcnow()
+                }
+            }
+        )
+        return {"success": True, "message": "Document moved to trash"}
