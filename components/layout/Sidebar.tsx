@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,7 +12,9 @@ import {
     LogOut,
     Menu,
     X,
-    Shield
+    Shield,
+    Settings,
+    UserCheck
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 
@@ -21,12 +23,32 @@ const navItems = [
     { name: 'Documents', href: '/documents', icon: FileText },
     { name: 'Upload', href: '/upload', icon: Upload },
     { name: 'Profile', href: '/profile', icon: User },
+    { name: 'Settings', href: '/settings', icon: Settings },
+];
+
+const verifierItems = [
+    { name: 'Dashboard', href: '/verifier/dashboard', icon: LayoutDashboard },
+    { name: 'Review Queue', href: '/verifier/queue', icon: UserCheck },
+    { name: 'All Documents', href: '/verifier/documents', icon: FileText },
 ];
 
 export default function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
     const [isMobileOpen, setIsMobileOpen] = useState(false);
+    const [userRole, setUserRole] = useState<string>('user');
+
+    useEffect(() => {
+        // Get user role from localStorage or API
+        const role = localStorage.getItem('userRole') || 'user';
+        setUserRole(role);
+    }, []);
+
+    // Determine which nav items to show based on role and current path
+    const isVerifierPath = pathname?.startsWith('/verifier');
+    const currentNavItems = isVerifierPath && (userRole === 'verifier' || userRole === 'admin')
+        ? verifierItems
+        : navItems;
 
     const handleLogout = () => {
         apiClient.removeToken();
@@ -89,8 +111,35 @@ export default function Sidebar() {
 
                 {/* Navigation */}
                 <nav className="p-4 flex-1 overflow-y-auto">
+                    {/* Role Switcher for Verifier/Admin */}
+                    {(userRole === 'verifier' || userRole === 'admin') && (
+                        <div className="mb-4 p-3 bg-slate-800/50 rounded-lg">
+                            <p className="text-xs text-slate-400 mb-2">Switch View:</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => router.push('/dashboard')}
+                                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-all ${!isVerifierPath
+                                        ? 'bg-emerald-500 text-white'
+                                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                        }`}
+                                >
+                                    User
+                                </button>
+                                <button
+                                    onClick={() => router.push('/verifier/dashboard')}
+                                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-all ${isVerifierPath
+                                        ? 'bg-emerald-500 text-white'
+                                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                        }`}
+                                >
+                                    Verifier
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     <ul className="space-y-1">
-                        {navItems.map((item) => {
+                        {currentNavItems.map((item) => {
                             const isActive = pathname === item.href;
                             const Icon = item.icon;
 

@@ -1,57 +1,67 @@
 'use client';
 
 import { useState } from 'react';
-import { Upload, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { Shield, CheckCircle, AlertCircle, ArrowRight } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
+import Sidebar from '@/components/layout/Sidebar';
+import DropZone from '@/components/upload/DropZone';
 
 export default function UploadPage() {
-    const [file, setFile] = useState<File | null>(null);
+    const router = useRouter();
+    const [files, setFiles] = useState<File[]>([]);
     const [uploading, setUploading] = useState(false);
-    const [result, setResult] = useState<any>(null);
-    const [error, setError] = useState<string>('');
-    const [dragActive, setDragActive] = useState(false);
+    const [uploadResults, setUploadResults] = useState<any[]>([]);
+    const [error, setError] = useState('');
 
-    const handleDrag = (e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.type === "dragenter" || e.type === "dragover") {
-            setDragActive(true);
-        } else if (e.type === "dragleave") {
-            setDragActive(false);
-        }
-    };
-
-    const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragActive(false);
-
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            setFile(e.dataTransfer.files[0]);
-            setError('');
-            setResult(null);
-        }
-    };
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            setFile(e.target.files[0]);
-            setError('');
-            setResult(null);
-        }
+    const handleFilesSelected = (selectedFiles: File[]) => {
+        setFiles(selectedFiles);
+        setError('');
+        setUploadResults([]);
     };
 
     const handleUpload = async () => {
-        if (!file) return;
+        if (files.length === 0) return;
 
         setUploading(true);
         setError('');
-        setResult(null);
+        setUploadResults([]);
 
         try {
-            const response = await apiClient.uploadDocument(file);
-            setResult(response);
-            setFile(null);
+            const results = [];
+
+            // Upload files sequentially
+            for (const file of files) {
+                try {
+                    const result = await apiClient.uploadDocument(file);
+                    results.push({
+                        file: file.name,
+                        success: true,
+                        data: result
+                    });
+                } catch (err: any) {
+                    const errorMessage = err.message || 'Upload failed';
+                    const isDuplicate = errorMessage.includes('Duplicate') || errorMessage.includes('already exists');
+
+                    results.push({
+                        file: file.name,
+                        success: false,
+                        error: errorMessage,
+                        isDuplicate
+                    });
+                }
+            }
+
+            setUploadResults(results);
+
+            // If all successful, redirect after 2 seconds
+            const allSuccess = results.every(r => r.success);
+            if (allSuccess) {
+                setTimeout(() => {
+                    router.push('/documents');
+                }, 2000);
+            }
         } catch (err: any) {
             setError(err.message || 'Upload failed');
         } finally {
@@ -60,164 +70,183 @@ export default function UploadPage() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 p-8 relative overflow-hidden">
-            {/* Grid background */}
-            <div className="absolute inset-0" style={{
-                backgroundImage: `linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px)`,
-                backgroundSize: '50px 50px'
-            }} />
-
-            {/* Gradient blobs */}
-            <div className="absolute top-0 left-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 right-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
-
-            <div className="max-w-4xl mx-auto relative z-10">
+        <div className="flex min-h-screen bg-slate-950">
+            <Sidebar />
+            <main className="flex-1 p-4 lg:p-8">
                 {/* Header */}
-                <div className="text-center mb-12">
-                    <h1 className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent mb-4">
-                        Upload Document
-                    </h1>
-                    <p className="text-slate-400">
-                        Upload your PDF or image for quantum-safe verification
-                    </p>
-                </div>
+                <section className="relative py-8 px-4 mb-8">
+                    <div className="absolute inset-0" style={{
+                        backgroundImage: `linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px)`,
+                        backgroundSize: '50px 50px'
+                    }} />
 
-                {/* Upload Area */}
-                <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800/50 rounded-2xl shadow-2xl p-8 mb-8">
-                    <div
-                        className={`border-2 border-dashed rounded-xl p-12 text-center transition-all ${dragActive
-                                ? 'border-emerald-500 bg-emerald-500/10'
-                                : 'border-slate-700 hover:border-emerald-500/50'
-                            }`}
-                        onDragEnter={handleDrag}
-                        onDragLeave={handleDrag}
-                        onDragOver={handleDrag}
-                        onDrop={handleDrop}
-                    >
-                        <Upload className="h-16 w-16 mx-auto mb-4 text-emerald-400" />
-
-                        {file ? (
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-center gap-2">
-                                    <FileText className="h-5 w-5 text-emerald-400" />
-                                    <span className="font-medium text-white">{file.name}</span>
-                                </div>
-                                <p className="text-sm text-slate-400">
-                                    Size: {(file.size / 1024).toFixed(2)} KB
-                                </p>
-                                <button
-                                    onClick={() => setFile(null)}
-                                    className="text-sm text-red-400 hover:underline"
-                                >
-                                    Remove
-                                </button>
-                            </div>
-                        ) : (
-                            <>
-                                <p className="text-lg mb-2 text-white">
-                                    Drag and drop your file here
-                                </p>
-                                <p className="text-slate-500 mb-4">or</p>
-                                <label className="cursor-pointer">
-                                    <span className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white rounded-lg hover:shadow-lg hover:shadow-emerald-500/20 transition-all inline-block font-medium">
-                                        Browse Files
-                                    </span>
-                                    <input
-                                        type="file"
-                                        className="hidden"
-                                        accept=".pdf,image/*"
-                                        onChange={handleFileChange}
-                                    />
-                                </label>
-                                <p className="text-sm text-slate-500 mt-4">
-                                    Supported: PDF, JPG, PNG (Max 10MB)
-                                </p>
-                            </>
-                        )}
-                    </div>
-
-                    {/* Upload Button */}
-                    {file && (
-                        <button
-                            onClick={handleUpload}
-                            disabled={uploading}
-                            className="w-full mt-6 px-6 py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
+                    <div className="max-w-4xl mx-auto relative z-10">
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
                         >
-                            {uploading ? (
-                                <>
-                                    <Loader2 className="h-5 w-5 animate-spin" />
-                                    Uploading & Analyzing...
-                                </>
-                            ) : (
-                                <>
-                                    <Upload className="h-5 w-5" />
-                                    Upload Document
-                                </>
-                            )}
-                        </button>
-                    )}
-                </div>
-
-                {/* Error Message */}
-                {error && (
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-8 flex items-center gap-3">
-                        <XCircle className="h-6 w-6 text-red-400" />
-                        <div>
-                            <p className="font-semibold text-red-400">Upload Failed</p>
-                            <p className="text-sm text-red-300">{error}</p>
-                        </div>
+                            <div className="flex items-center gap-4 mb-4">
+                                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+                                    <Shield className="w-6 h-6 text-emerald-400" />
+                                </div>
+                                <div>
+                                    <h1 className="text-4xl font-bold text-white">Upload Documents</h1>
+                                    <p className="text-slate-400 mt-1">
+                                        Securely upload your documents for quantum-safe verification
+                                    </p>
+                                </div>
+                            </div>
+                        </motion.div>
                     </div>
-                )}
+                </section>
 
-                {/* Success Result */}
-                {result?.success && (
-                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-6">
-                        <div className="flex items-center gap-3 mb-4">
-                            <CheckCircle className="h-6 w-6 text-emerald-400" />
-                            <h3 className="font-semibold text-emerald-400 text-lg">
-                                Upload Successful!
-                            </h3>
-                        </div>
+                {/* Upload Section */}
+                <section className="max-w-4xl mx-auto px-4">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.1 }}
+                        className="p-8 rounded-xl bg-slate-900/50 backdrop-blur-xl border border-slate-800/50"
+                    >
+                        <DropZone
+                            onFilesSelected={handleFilesSelected}
+                            maxFiles={10}
+                            maxSize={10 * 1024 * 1024} // 10MB
+                        />
 
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                                <p className="text-slate-400">File Name:</p>
-                                <p className="font-medium text-white">{result.document?.fileName}</p>
-                            </div>
-                            <div>
-                                <p className="text-slate-400">File Size:</p>
-                                <p className="font-medium text-white">
-                                    {(result.document?.fileSize / 1024).toFixed(2)} KB
+                        {/* Upload Button */}
+                        {files.length > 0 && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mt-6 flex justify-end"
+                            >
+                                <button
+                                    onClick={handleUpload}
+                                    disabled={uploading}
+                                    className="px-8 py-3 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 disabled:cursor-not-allowed text-black disabled:text-slate-500 font-semibold flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20 disabled:shadow-none"
+                                >
+                                    {uploading ? (
+                                        <>
+                                            <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                                            Uploading {files.length} file{files.length > 1 ? 's' : ''}...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Upload {files.length} file{files.length > 1 ? 's' : ''}
+                                            <ArrowRight className="w-5 h-5" />
+                                        </>
+                                    )}
+                                </button>
+                            </motion.div>
+                        )}
+
+                        {/* Error Message */}
+                        {error && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mt-6 p-4 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-3"
+                            >
+                                <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                                <div className="flex-1">
+                                    <p className="text-sm font-semibold text-red-400 mb-1">Upload Failed</p>
+                                    <p className="text-sm text-red-400/80">{error}</p>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {/* Upload Results */}
+                        {uploadResults.length > 0 && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mt-6 space-y-3"
+                            >
+                                <h3 className="text-sm font-semibold text-slate-400 mb-4">Upload Results</h3>
+
+                                {uploadResults.map((result, index) => (
+                                    <motion.div
+                                        key={index}
+                                        initial={{ opacity: 0, x: -20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: index * 0.1 }}
+                                        className={`p-4 rounded-lg border flex items-start gap-3 ${result.success
+                                            ? 'bg-emerald-500/10 border-emerald-500/30'
+                                            : 'bg-red-500/10 border-red-500/30'
+                                            }`}
+                                    >
+                                        {result.success ? (
+                                            <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                                        ) : (
+                                            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                                        )}
+                                        <div className="flex-1">
+                                            <p className={`text-sm font-medium ${result.success ? 'text-emerald-400' : 'text-red-400'
+                                                }`}>
+                                                {result.file}
+                                            </p>
+                                            <p className={`text-xs mt-1 ${result.success ? 'text-emerald-400/70' : 'text-red-400/70'
+                                                }`}>
+                                                {result.success
+                                                    ? 'Uploaded successfully'
+                                                    : result.error || 'Upload failed'
+                                                }
+                                            </p>
+                                        </div>
+                                    </motion.div>
+                                ))}
+
+                                {uploadResults.every(r => r.success) && (
+                                    <motion.p
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        transition={{ delay: 0.5 }}
+                                        className="text-sm text-center text-emerald-400 mt-4"
+                                    >
+                                        Redirecting to documents page...
+                                    </motion.p>
+                                )}
+                            </motion.div>
+                        )}
+                    </motion.div>
+
+                    {/* Features */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="mt-8 grid md:grid-cols-3 gap-6"
+                    >
+                        {[
+                            {
+                                title: 'Quantum-Safe',
+                                description: 'Post-quantum cryptographic hashing for future-proof security'
+                            },
+                            {
+                                title: 'AI-Powered',
+                                description: 'Automatic document analysis and authenticity verification'
+                            },
+                            {
+                                title: 'Blockchain Ready',
+                                description: 'Verification chain stored with immutable proof of authenticity'
+                            }
+                        ].map((feature, index) => (
+                            <div
+                                key={index}
+                                className="p-6 rounded-lg bg-slate-900/30 border border-slate-800/50"
+                            >
+                                <h3 className="text-sm font-semibold text-emerald-400 mb-2">
+                                    {feature.title}
+                                </h3>
+                                <p className="text-sm text-slate-400">
+                                    {feature.description}
                                 </p>
                             </div>
-                            <div>
-                                <p className="text-slate-400">File Hash:</p>
-                                <p className="font-mono text-xs text-slate-300">
-                                    {result.document?.fileHash?.substring(0, 16)}...
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-slate-400">Status:</p>
-                                <p className="font-medium capitalize text-white">
-                                    {result.document?.verificationStatus}
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
-                            <p className="text-sm text-emerald-400">
-                                ✅ Document digitally signed with RSA-2048
-                            </p>
-                            <p className="text-sm text-emerald-400">
-                                ✅ SHA-256 hash generated
-                            </p>
-                            <p className="text-sm text-emerald-400">
-                                ✅ PDF text extracted successfully
-                            </p>
-                        </div>
-                    </div>
-                )}
-            </div>
+                        ))}
+                    </motion.div>
+                </section>
+            </main>
         </div>
     );
 }

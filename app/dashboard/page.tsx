@@ -9,6 +9,11 @@ import {
     Shield, Activity, Terminal, Zap, LogOut
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
+import LoadingScreen from '@/components/animations/LoadingScreen';
+import UploadTrendChart from '@/components/dashboard/UploadTrendChart';
+import DocumentTypesChart from '@/components/dashboard/DocumentTypesChart';
+import VerificationChart from '@/components/dashboard/VerificationChart';
+import ActivityTimeline from '@/components/dashboard/ActivityTimeline';
 
 
 export default function DashboardPage() {
@@ -19,6 +24,7 @@ export default function DashboardPage() {
         pendingDocuments: 0,
         averageScore: 0,
     });
+    const [documents, setDocuments] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [authenticated, setAuthenticated] = useState(false);
 
@@ -40,6 +46,9 @@ export default function DashboardPage() {
     const loadStats = async () => {
         try {
             const docs = await apiClient.getDocuments();
+            setDocuments(docs); // Store for charts
+
+            // Calculate stats
             const verified = docs.filter((d: any) => d.verificationStatus === 'verified').length;
             const pending = docs.filter((d: any) => d.verificationStatus === 'pending').length;
 
@@ -49,8 +58,14 @@ export default function DashboardPage() {
                 pendingDocuments: pending,
                 averageScore: verified > 0 ? 95.5 : 0,
             });
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to load stats:', error);
+            // Redirect to login on authentication errors
+            if (error.message && (error.message.includes('Not authenticated') ||
+                error.message.includes('401') ||
+                error.message.includes('Unauthorized'))) {
+                router.push('/login?expired=true');
+            }
         } finally {
             setLoading(false);
         }
@@ -97,22 +112,22 @@ export default function DashboardPage() {
     ];
 
     return (
-        <div className="relative overflow-hidden">
+        <>
             {/* Grid background */}
-            <div className="absolute inset-0" style={{
+            <div className="fixed inset-0 pointer-events-none" style={{
                 backgroundImage: `linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px)`,
                 backgroundSize: '50px 50px'
             }} />
 
             {/* Gradient blobs */}
-            <div className="absolute top-0 left-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 right-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
+            <div className="fixed top-0 left-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="fixed bottom-0 right-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
             <div className="relative z-10">
                 {/* Header */}
                 <section className="py-8 px-4">
                     <div className="max-w-7xl mx-auto">
-                        
+
 
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
@@ -162,6 +177,24 @@ export default function DashboardPage() {
                         </div>
                     </div>
                 </section>
+
+                {/* Analytics Charts */}
+                <div className="max-w-7xl mx-auto px-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                        <UploadTrendChart documents={documents} />
+                        <DocumentTypesChart documents={documents} />
+                    </div>
+
+                    {/* Verification Status */}
+                    <div className="mb-8">
+                        <VerificationChart documents={documents} />
+                    </div>
+
+                    {/* Activity Timeline */}
+                    <div className="mb-8">
+                        <ActivityTimeline />
+                    </div>
+                </div>
 
                 {/* Quick Actions */}
                 <section className="px-4 mb-8">
@@ -247,7 +280,7 @@ export default function DashboardPage() {
                     </div>
                 </section>
             </div>
-        </div>
+        </>
     );
 }
 

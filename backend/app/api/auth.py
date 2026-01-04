@@ -44,17 +44,26 @@ async def login(credentials: UserLogin):
     
     # Find user
     user = await db.users.find_one({"email": credentials.email})
-    if not user or not verify_password(credentials.password, user["hashed_password"]):
+    
+    # Check if user exists and verify password
+    # Support both 'password' and 'hashed_password' field names for backwards compatibility
+    password_field = user.get("hashed_password") or user.get("password") if user else None
+    
+    if not user or not password_field or not verify_password(credentials.password, password_field):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Create access token
+    # Create access token with user role
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user["email"]}, expires_delta=access_token_expires
+        data={
+            "sub": user["email"],
+            "role": user.get("role", "user")
+        },
+        expires_delta=access_token_expires
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
@@ -93,3 +102,115 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user["_id"] = str(user["_id"])
     
     return user
+
+@router.get("/me")
+async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current user with role"""
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication"
+        )
+    
+    email = payload.get("sub")
+    db = get_database()
+    user = await db.users.find_one({"email": email})
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Ensure name is never None
+    user_name = user.get("name")
+    if user_name is None:
+        user_name = ""
+    
+    return {
+        "id": str(user["_id"]),
+        "email": user["email"],
+        "name": user_name,
+        "role": user.get("role", "user")
+    }
+
+@router.put("/profile", response_model=User)
+async def update_profile(
+    profile: dict,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Update user profile"""
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
+    
+    email = payload.get("sub")
+    db = get_database()
+    
+    # Update user name
+    result = await db.users.update_one(
+        {"email": email},
+        {"$set": {"name": profile.get("name")}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to update profile"
+        )
+    
+    # Return updated user
+    user = await db.users.find_one({"email": email})
+    if "_id" in user:
+        user["_id"] = str(user["_id"])
+    
+    return user
+
+@router.post("/change-password")
+async def change_password(
+    password_data: dict,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Change user password"""
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
+    
+    email = payload.get("sub")
+    db = get_database()
+    user = await db.users.find_one({"email": email})
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Verify current password
+    if not verify_password(password_data.get("current_password"), user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect"
+        )
+    
+    # Update password
+    hashed_password = get_password_hash(password_data.get("new_password"))
+    await db.users.update_one(
+        {"email": email},
+        {"$set": {"hashed_password": hashed_password}}
+    )
+    
+    return {"success": True, "message": "Password changed successfully"}

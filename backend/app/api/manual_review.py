@@ -115,12 +115,16 @@ async def manual_review(
             detail="Document not found"
         )
     
-    # Create verification record
-    verification_record = {
-        "document_id": document_id,
-        "verifier_id": user_id,
+    # Get reviewer name
+    reviewer = await db.users.find_one({"_id": ObjectId(user_id)})
+    reviewer_name = reviewer.get("name", "Unknown") if reviewer else "Unknown"
+    
+    # Create review entry for history
+    review_entry = {
+        "reviewer_id": ObjectId(user_id),
+        "reviewer_name": reviewer_name,
         "decision": review.decision,
-        "notes": review.verifier_notes,
+        "notes": review.verifier_notes or "",
         "reviewed_at": datetime.utcnow()
     }
     
@@ -134,9 +138,9 @@ async def manual_review(
         {
             "$set": {
                 "verificationStatus": new_status,
-                "manualReview": verification_record,
                 "updatedAt": datetime.utcnow()
             },
+            "$push": {"review_history": review_entry},  # Add to review_history array
             "$inc": {"verificationCount": 1}
         }
     )
@@ -144,7 +148,14 @@ async def manual_review(
     return {
         "success": True,
         "message": f"Document {review.decision}",
-        "verification": verification_record
+        "verification": {
+            "document_id": document_id,
+            "verifier_id": user_id,
+            "verifier_name": reviewer_name,
+            "decision": review.decision,
+            "notes": review.verifier_notes,
+            "reviewed_at": datetime.utcnow().isoformat()
+        }
     }
 
 @router.post("/{document_id}/assign")

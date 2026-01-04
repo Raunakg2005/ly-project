@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "DocShield API"
     DEBUG: bool = True
     BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    APP_URL: str = "http://localhost:3000"  # Frontend URL for QR codes
     
     # File Upload
     MAX_FILE_SIZE: int = 10485760  # 10MB

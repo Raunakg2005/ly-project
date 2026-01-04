@@ -53,6 +53,7 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -68,7 +69,7 @@ html {
   .custom-cursor-page {
     cursor: none;
   }
-  
+
   .custom-cursor-page a,
   .custom-cursor-page button,
   .custom-cursor-page input,
@@ -113,10 +114,13 @@ html {
 
 /* Glow animations */
 @keyframes glow {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
     filter: brightness(1);
   }
+
   50% {
     opacity: 0.8;
     filter: brightness(1.2);
@@ -132,9 +136,11 @@ html {
   0% {
     background-position: 0% 50%;
   }
+
   50% {
     background-position: 100% 50%;
   }
+
   100% {
     background-position: 0% 50%;
   }
@@ -147,9 +153,12 @@ html {
 
 /* Floating animation */
 @keyframes float {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0px);
   }
+
   50% {
     transform: translateY(-20px);
   }
@@ -161,9 +170,12 @@ html {
 
 /* Pulse glow */
 @keyframes pulse-glow {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
   }
+
   50% {
     box-shadow: 0 0 40px rgba(168, 85, 247, 0.8);
   }

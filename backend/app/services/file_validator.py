@@ -31,24 +31,37 @@ class FileValidator:
         """
         issues = []
         
+        # Check for PDF by magic number first (more reliable than MIME type)
+        is_pdf_by_magic = file_content.startswith(b'%PDF-')
+        
         # Get actual file type from magic numbers
         try:
             actual_type = self.magic.from_buffer(file_content)
         except Exception as e:
-            return {
-                "valid": False,
-                "actual_type": None,
-                "declared_type": declared_type,
-                "issues": [f"Could not determine file type: {e}"],
-                "security_score": 0
-            }
+            # If magic fails but we detected PDF by magic number, accept it
+            if is_pdf_by_magic and declared_type == 'application/pdf':
+                actual_type = 'application/pdf'
+            else:
+                return {
+                    "valid": False,
+                    "actual_type": None,
+                    "declared_type": declared_type,
+                    "issues": [f"Could not determine file type: {e}"],
+                    "security_score": 0
+                }
+        
+        # Override actual_type if we detected PDF by magic number
+        # This handles cases where python-magic incorrectly identifies PDFs as text/plain
+        if is_pdf_by_magic and declared_type == 'application/pdf':
+            actual_type = 'application/pdf'
         
         # Check if actual type matches declared type
         if actual_type not in self.ALLOWED_TYPES:
             issues.append(f"File type not allowed: {actual_type}")
         
         # Check for type mismatch (spoofing attempt)
-        if declared_type and declared_type != actual_type:
+        # Skip this check if we detected PDF by magic number
+        if declared_type and declared_type != actual_type and not is_pdf_by_magic:
             # Allow some MIME type variations
             if not self._is_type_variation(declared_type, actual_type):
                 issues.append(f"Type mismatch: declared '{declared_type}' but actual is '{actual_type}'")

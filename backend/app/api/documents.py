@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import List
+from typing import List, Optional
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.schemas.document import DocumentResponse, UploadResponse
 from app.core.security import decode_access_token
@@ -94,6 +94,23 @@ async def upload_document(
             user_id
         )
         
+        # Check for duplicate file by hash
+        db = get_database()
+        user_obj_id = ObjectId(user_id)
+        
+        existing_doc = await db.documents.find_one({
+            "userId": user_obj_id,
+            "fileHash": file_hash
+        })
+        
+        if existing_doc:
+            # Delete the file we just saved since it's a duplicate
+            file_manager.delete_file(file_path)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Duplicate file detected. A document with the same content already exists: {existing_doc.get('fileName', 'unknown')}"
+            )
+        
         # Extract text
         extracted_text = await extract_text(file_content, file.content_type)
         
@@ -162,37 +179,100 @@ async def upload_document(
             detail=f"Upload failed: {str(e)}"
         )
 
-@router.get("/", response_model=List[DocumentResponse])
+@router.get("/")
 async def list_documents(
     user_id: str = Depends(get_current_user_id),
-    skip: int = 0,
-    limit: int = 20,
+    search: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    date_range: Optional[str] = None,
+    sort_by: str = "createdAt",
+    sort_order: str = "desc",
+    page: int = 1,
+    limit: int = 10,
     include_deleted: bool = False
 ):
-    """List user's documents (excludes deleted by default)"""
+    """
+    List user's documents with search, filter, sort, and pagination
+    
+    Query Parameters:
+    - search: Search by document name (case-insensitive)
+    - status_filter: Filter by verification status (pending/analyzed/verified/flagged/all)
+    - date_range: Filter by date (last7/last30/last90/all)
+    - sort_by: Sort field (createdAt/fileName/fileSize)
+    - sort_order: Sort order (asc/desc)
+    - page: Page number (default: 1)
+    - limit: Items per page (default: 10, max: 100)
+    - include_deleted: Include deleted documents (default: false)
+    """
     db = get_database()
     
+    # Build query
     query = {"userId": ObjectId(user_id)}
+    
     if not include_deleted:
         query["isDeleted"] = {"$ne": True}
     
-    cursor = db.documents.find(query).sort("createdAt", -1).skip(skip).limit(limit)
+    # Add search filter
+    if search:
+        query["fileName"] = {"$regex": search, "$options": "i"}
     
+    # Add status filter
+    if status_filter and status_filter != "all":
+        query["verificationStatus"] = status_filter
+    
+    # Add date range filter
+    if date_range and date_range != "all":
+        now = datetime.utcnow()
+        date_map = {
+            "last7": now - timedelta(days=7),
+            "last30": now - timedelta(days=30),
+            "last90": now - timedelta(days=90)
+        }
+        if date_range in date_map:
+            query["createdAt"] = {"$gte": date_map[date_range]}
+    
+    # Calculate pagination
+    limit = min(limit, 100)  # Max 100 items per page
+    skip = (page - 1) * limit
+    
+    # Build sort
+    sort_direction = 1 if sort_order == "asc" else -1
+    
+    # Get documents
+    cursor = db.documents.find(query).sort(sort_by, sort_direction).skip(skip).limit(limit)
     documents = await cursor.to_list(length=limit)
     
-    return [
-        DocumentResponse(
-            id=str(doc["_id"]),
-            fileName=doc["fileName"],
-            fileSize=doc["fileSize"],
-            fileType=doc["fileType"],
-            category=doc["metadata"].get("category", "other"),
-            uploadedAt=doc["createdAt"],
-            verificationStatus=doc["verificationStatus"],
-            fileHash=doc["fileHash"]
-        )
-        for doc in documents
-    ]
+    # Helper function to serialize review history
+    def serialize_review_history(history):
+        if not history:
+            return []
+        return [
+            {
+                "reviewer_id": str(item.get("reviewer_id", "")),
+                "reviewer_name": item.get("reviewer_name", ""),
+                "decision": item.get("decision", ""),
+                "notes": item.get("notes", ""),
+                "reviewed_at": item.get("reviewed_at").isoformat() if item.get("reviewed_at") else None
+            }
+            for item in history
+        ]
+    
+    # Build response with review history
+    result = []
+    for doc in documents:
+        result.append({
+            "id": str(doc["_id"]),
+            "fileName": doc["fileName"],
+            "fileSize": doc["fileSize"],
+            "fileType": doc["fileType"],
+            "category": doc["metadata"].get("category", "other"),
+            "uploadedAt": doc["createdAt"].isoformat(),
+            "verificationStatus": doc["verificationStatus"],
+            "fileHash": doc["fileHash"],
+            "reviewHistory": serialize_review_history(doc.get("review_history", []))
+        })
+    
+    return result
 
 @router.get("/{document_id}")
 async def get_document(
@@ -213,8 +293,22 @@ async def get_document(
             detail="Document not found"
         )
     
+    # Serialize review history
+    review_history = document.get("review_history", [])
+    serialized_reviews = []
+    if review_history:
+        for review in review_history:
+            serialized_reviews.append({
+                "reviewer_id": str(review.get("reviewer_id", "")),
+                "reviewer_name": review.get("reviewer_name", ""),
+                "decision": review.get("decision", ""),
+                "notes": review.get("notes", ""),
+                "reviewed_at": review.get("reviewed_at").isoformat() if review.get("reviewed_at") else None
+            })
+    
     document["_id"] = str(document["_id"])
     document["userId"] = str(document["userId"])
+    document["reviewHistory"] = serialized_reviews
     
     return document
 

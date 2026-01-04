@@ -3,15 +3,19 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { User, Mail, Shield, LogOut, Key, Bell, Database } from 'lucide-react';
+import { User, Mail, Shield, LogOut, Key, Bell, Database, Edit } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import LoadingScreen from '@/components/animations/LoadingScreen';
+import EditProfileModal from '@/components/profile/EditProfileModal';
+import ChangePasswordModal from '@/components/profile/ChangePasswordModal';
 
 export default function ProfilePage() {
     const router = useRouter();
     const [user, setUser] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [mounted, setMounted] = useState(false);
+    const [editModalOpen, setEditModalOpen] = useState(false);
+    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
     useEffect(() => {
         setMounted(true);
@@ -28,7 +32,7 @@ export default function ProfilePage() {
             const token = apiClient.getToken();
             if (!token) {
                 console.log('❌ No token found, redirecting to login');
-                router.push('/login');
+                router.push('/login?expired=true');
                 return;
             }
 
@@ -36,19 +40,28 @@ export default function ProfilePage() {
             const userData = await apiClient.getCurrentUser();
             console.log('✅ User data loaded:', userData);
             setUser(userData);
-        } catch (error) {
+        } catch (error: any) {
             console.error('❌ Failed to load user:', error);
-            // Only redirect on auth errors, not network errors
-            if (error instanceof Error && error.message.includes('Not authenticated')) {
-                router.push('/login');
-            } else {
-                // Set a default user for now to show the UI
-                setUser({
-                    name: 'User',
-                    email: 'user@docshield.com',
-                    role: 'user'
-                });
+
+            // Check if it's an auth error by looking at the error message
+            const errorMessage = error?.message || error?.toString() || '';
+            const isAuthError = errorMessage.includes('Not authenticated') ||
+                errorMessage.includes('401') ||
+                errorMessage.includes('Unauthorized') ||
+                errorMessage.includes('Session expired');
+
+            if (isAuthError) {
+                console.log('🔄 Redirecting to login due to auth error...');
+                router.push('/login?expired=true');
+                return; // Stop here, don't set fallback user
             }
+
+            // Only set fallback user for non-auth errors
+            setUser({
+                name: 'User',
+                email: 'user@docshield.com',
+                role: 'user'
+            });
         } finally {
             setLoading(false);
         }
@@ -59,13 +72,35 @@ export default function ProfilePage() {
         router.push('/');
     };
 
+    const handleSaveProfile = async (name: string) => {
+        try {
+            const updated = await apiClient.updateProfile(name);
+            setUser(updated);
+            setEditModalOpen(false);
+        } catch (error) {
+            throw error; // Let modal handle the error
+        }
+    };
+
+    const handleChangePassword = async (currentPassword: string, newPassword: string) => {
+        try {
+            await apiClient.changePassword(currentPassword, newPassword);
+            setPasswordModalOpen(false);
+            // Logout after password change
+            apiClient.removeToken();
+            router.push('/login');
+        } catch (error) {
+            throw error; // Let modal handle the error
+        }
+    };
+
     if (loading) {
         return <LoadingScreen />;
     }
 
     return (
         <div className="flex min-h-screen bg-slate-950">
-            
+
             <main className="flex-1">
                 <section className="relative py-16 px-4 overflow-hidden">
                     <div className="absolute inset-0" style={{
@@ -107,6 +142,27 @@ export default function ProfilePage() {
                                             <Mail className="w-5 h-5 text-slate-400" />
                                             <span className="text-white">{user?.email || 'user@example.com'}</span>
                                         </div>
+                                    </div>
+
+                                    <div className="flex gap-2 mt-6">
+                                        <motion.button
+                                            whileHover={{ scale: 1.05 }}
+                                            whileTap={{ scale: 0.95 }}
+                                            onClick={() => setEditModalOpen(true)}
+                                            className="flex-1 px-4 py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-sm font-medium flex items-center justify-center gap-2 transition-all"
+                                        >
+                                            <Edit className="w-4 h-4" />
+                                            Edit Profile
+                                        </motion.button>
+                                        <motion.button
+                                            whileHover={{ scale: 1.05 }}
+                                            whileTap={{ scale: 0.95 }}
+                                            onClick={() => setPasswordModalOpen(true)}
+                                            className="flex-1 px-4 py-2 rounded-lg bg-slate-800/50 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-white text-sm font-medium flex items-center justify-center gap-2 transition-all"
+                                        >
+                                            <Key className="w-4 h-4" />
+                                            Change Password
+                                        </motion.button>
                                     </div>
 
                                     <div>
@@ -182,6 +238,21 @@ export default function ProfilePage() {
                     </div>
                 </section>
             </main>
+
+            {/* Modals */}
+            <EditProfileModal
+                isOpen={editModalOpen}
+                currentName={user?.name || ''}
+                currentEmail={user?.email || ''}
+                onSave={handleSaveProfile}
+                onCancel={() => setEditModalOpen(false)}
+            />
+
+            <ChangePasswordModal
+                isOpen={passwordModalOpen}
+                onChangePassword={handleChangePassword}
+                onCancel={() => setPasswordModalOpen(false)}
+            />
         </div>
     );
 }
