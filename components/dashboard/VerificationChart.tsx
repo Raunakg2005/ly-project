@@ -39,9 +39,9 @@ export default function VerificationChart({ documents }: VerificationChartProps)
                 <p className="text-sm text-slate-400">Document verification breakdown</p>
             </div>
 
-            <div className="flex items-center gap-8">
+            <div className="flex flex-col lg:flex-row items-center gap-6 lg:gap-8">
                 {/* Doughnut Chart */}
-                <div className="relative">
+                <div className="relative flex-shrink-0">
                     <ResponsiveContainer width={200} height={200}>
                         <PieChart>
                             <Pie
@@ -78,12 +78,12 @@ export default function VerificationChart({ documents }: VerificationChartProps)
                 </div>
 
                 {/* Stats */}
-                <div className="flex-1 space-y-4">
+                <div className="flex-1 w-full lg:w-auto space-y-3 sm:space-y-4">
                     {data.map((item, index) => {
                         const Icon = item.icon;
                         const percentage = ((item.value / total) * 100).toFixed(0);
                         return (
-                            <div key={index} className="flex items-center justify-between">
+                            <div key={index} className="flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-3">
                                     <div
                                         className="p-2 rounded-lg"

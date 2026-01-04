@@ -60,10 +60,18 @@ export default function DashboardPage() {
             });
         } catch (error: any) {
             console.error('Failed to load stats:', error);
+            const errorMessage = error?.message || '';
+
+            // Check if user is banned
+            if (errorMessage.includes('BANNED') || errorMessage.includes('suspended')) {
+                router.push('/banned');
+                return;
+            }
+
             // Redirect to login on authentication errors
-            if (error.message && (error.message.includes('Not authenticated') ||
-                error.message.includes('401') ||
-                error.message.includes('Unauthorized'))) {
+            if (errorMessage && (errorMessage.includes('Not authenticated') ||
+                errorMessage.includes('401') ||
+                errorMessage.includes('Unauthorized'))) {
                 router.push('/login?expired=true');
             }
         } finally {
@@ -192,7 +200,7 @@ export default function DashboardPage() {
 
                     {/* Activity Timeline */}
                     <div className="mb-8">
-                        <ActivityTimeline />
+                        <ActivityTimeline documents={documents} />
                     </div>
                 </div>
 

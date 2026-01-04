@@ -38,6 +38,27 @@ async def get_current_user_with_role(credentials: HTTPAuthorizationCredentials =
             detail="User not found"
         )
     
+    # Check if password was changed after token was issued
+    token_pwd_changed_at = payload.get("pwd_changed_at")
+    user_pwd_changed_at = user.get("password_changed_at")
+    
+    if user_pwd_changed_at:
+        from datetime import datetime
+        user_pwd_time = user_pwd_changed_at.isoformat() if isinstance(user_pwd_changed_at, datetime) else str(user_pwd_changed_at)
+        
+        if token_pwd_changed_at != user_pwd_time:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired due to password change. Please login again."
+            )
+    
+    # Check if user is banned
+    if user.get("banned", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been suspended"
+        )
+    
     # Check role
     role = user.get("role", "user")
     if role not in ["verifier", "admin"]:
@@ -59,6 +80,7 @@ async def get_all_documents(
     search: Optional[str] = None,
     status_filter: Optional[str] = None,
     date_range: Optional[str] = None,
+    show_deleted: bool = Query(False, description="Show deleted documents"),
     sort_by: str = "uploadedAt",
     sort_order: str = "desc",
     page: int = Query(1, ge=1),
@@ -71,11 +93,28 @@ async def get_all_documents(
     # Build query
     query = {}
     
-    if search:
-        query["$or"] = [
-            {"fileName": {"$regex": search, "$options": "i"}},
-            {"category": {"$regex": search, "$options": "i"}}
+    # Filter deleted documents unless show_deleted is True
+    if not show_deleted:
+        query["$and"] = [
+            {
+                "$or": [
+                    {"isDeleted": {"$exists": False}},
+                    {"isDeleted": False}
+                ]
+            }
         ]
+    
+    if search:
+        search_condition = {
+            "$or": [
+                {"fileName": {"$regex": search, "$options": "i"}},
+                {"category": {"$regex": search, "$options": "i"}}
+            ]
+        }
+        if "$and" in query:
+            query["$and"].append(search_condition)
+        else:
+            query.update(search_condition)
     
     if status_filter and status_filter != "all":
         query["verificationStatus"] = status_filter
@@ -133,6 +172,7 @@ async def get_all_documents(
             "fileHash": doc.get("fileHash", ""),
             "userId": str(doc["userId"]) if doc.get("userId") else "",
             "userName": user.get("name", "Unknown") if user else "Unknown",
+            "isDeleted": doc.get("isDeleted", False),
             "reviewHistory": review_history
         })
     

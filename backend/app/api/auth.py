@@ -56,12 +56,20 @@ async def login(credentials: UserLogin):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # Check if user is banned
+    if user.get("banned", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been suspended",
+        )
+    
     # Create access token with user role
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={
             "sub": user["email"],
-            "role": user.get("role", "user")
+            "role": user.get("role", "user"),
+            "pwd_changed_at": user.get("password_changed_at").isoformat() if user.get("password_changed_at") else None
         },
         expires_delta=access_token_expires
     )
@@ -97,6 +105,28 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             detail="User not found"
         )
     
+    # Check if password was changed after token was issued (invalidate old sessions)
+    token_pwd_changed_at = payload.get("pwd_changed_at")
+    user_pwd_changed_at = user.get("password_changed_at")
+    
+    if user_pwd_changed_at:
+        # If user has password_changed_at but token doesn't, or they don't match - token is invalid
+        from datetime import datetime
+        user_pwd_time = user_pwd_changed_at.isoformat() if isinstance(user_pwd_changed_at, datetime) else str(user_pwd_changed_at)
+        
+        if token_pwd_changed_at != user_pwd_time:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired due to password change. Please login again.",
+            )
+    
+    # Check if user is banned - CRITICAL SECURITY CHECK
+    if user.get("banned", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been suspended",
+        )
+    
     # Convert ObjectId to string
     if "_id" in user:
         user["_id"] = str(user["_id"])
@@ -130,11 +160,19 @@ async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depe
     if user_name is None:
         user_name = ""
     
+    # Check if user is banned
+    if user.get("banned", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been suspended",
+        )
+    
     return {
         "id": str(user["_id"]),
         "email": user["email"],
         "name": user_name,
-        "role": user.get("role", "user")
+        "role": user.get("role", "user"),
+        "banned": user.get("banned", False)
     }
 
 @router.put("/profile", response_model=User)
@@ -208,9 +246,13 @@ async def change_password(
     
     # Update password
     hashed_password = get_password_hash(password_data.get("new_password"))
+    from datetime import datetime
     await db.users.update_one(
         {"email": email},
-        {"$set": {"hashed_password": hashed_password}}
+        {"$set": {
+            "hashed_password": hashed_password,
+            "password_changed_at": datetime.utcnow()
+        }}
     )
     
     return {"success": True, "message": "Password changed successfully"}

@@ -66,7 +66,13 @@ export default function AuthPage() {
                 }
             }
         } catch (err: any) {
-            setError(err.message || 'Authentication failed');
+            const errorMsg = err.message || 'Authentication failed';
+            if (errorMsg.includes('Account suspended')) {
+                // Redirect to banned page
+                window.location.href = '/banned';
+                return;
+            }
+            setError(errorMsg);
         } finally {
             setLoading(false);
         }

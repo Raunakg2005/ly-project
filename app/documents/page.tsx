@@ -6,16 +6,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     FileText, Search, Filter, Upload, Download, Trash2,
     Shield, CheckCircle, Clock, AlertTriangle, Grid,
-    List, ChevronDown, X, Eye, Sparkles, Terminal, UserCheck, Link2
+    List, ChevronDown, X, Eye, Sparkles, Terminal, UserCheck, Link2, Tag
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import LoadingScreen from '@/components/animations/LoadingScreen';
 import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal';
 import ViewDocumentModal from '@/components/modals/ViewDocumentModal';
 import ManualReviewModal from '@/components/modals/ManualReviewModal';
+import EditCategoryModal from '@/components/modals/EditCategoryModal';
 import CertificateButton from '@/components/CertificateButton';
 import SearchBar from '@/components/SearchBar';
 import DocumentFilters, { DocumentStatus, DateRange, SortOption } from '@/components/filters/DocumentFilters';
+import AdvancedFilters from '@/components/filters/AdvancedFilters';
 import ShareModal from '@/components/modals/ShareModal';
 import Pagination from '@/components/Pagination';
 
@@ -51,6 +53,7 @@ export default function DocumentsPage() {
     const [deleteLoading, setDeleteLoading] = useState(false);
     const [userRole, setUserRole] = useState<string>('user');
     const [shareModal, setShareModal] = useState<{ open: boolean; doc: Document | null }>({ open: false, doc: null });
+    const [categoryModal, setCategoryModal] = useState<{ open: boolean; doc: Document | null }>({ open: false, doc: null });
 
     // New search and filter state
     const [searchTerm, setSearchTerm] = useState('');
@@ -69,17 +72,31 @@ export default function DocumentsPage() {
     const [itemsPerPage, setItemsPerPage] = useState(10);
     const [totalItems, setTotalItems] = useState(0);
 
+    // Advanced filters state
+    const [advancedFilters, setAdvancedFilters] = useState<{
+        file_type?: string;
+        category?: string;
+        min_size?: number;
+        max_size?: number;
+        start_date?: string;
+        end_date?: string;
+    }>({});
+
     useEffect(() => {
         loadDocuments();
         loadUserRole();
-    }, [searchTerm, filters, currentPage, itemsPerPage]);
+    }, [searchTerm, filters, currentPage, itemsPerPage, advancedFilters]);
 
     const loadUserRole = async () => {
         try {
             const user = await apiClient.getCurrentUser();
             setUserRole(user.role);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to load user role:', error);
+            if (error.message.includes('BANNED') || error.message.includes('suspended')) {
+                router.push('/banned');
+                return;
+            }
             // Default to 'user' role if fetch fails
             setUserRole('user');
         }
@@ -102,15 +119,31 @@ export default function DocumentsPage() {
                 sort_by: sortMap[filters.sortBy].sort_by,
                 sort_order: sortMap[filters.sortBy].sort_order,
                 page: currentPage,
-                limit: itemsPerPage
+                limit: itemsPerPage,
+                ...advancedFilters
             });
 
             setDocuments(docs);
-            // Estimate total (backend doesn't return count yet)
-            setTotalItems(docs.length < itemsPerPage ? (currentPage - 1) * itemsPerPage + docs.length : currentPage * itemsPerPage + 1);
+
+            // Better total items calculation
+            if (docs.total !== undefined) {
+                // Backend returned total count
+                setTotalItems(docs.total);
+            } else if (currentPage === 1 && docs.length < itemsPerPage) {
+                // On first page and got fewer docs than requested = that's all there is
+                setTotalItems(docs.length);
+            } else if (docs.length < itemsPerPage) {
+                // On later page and got fewer docs = calculate exact total
+                setTotalItems((currentPage - 1) * itemsPerPage + docs.length);
+            } else {
+                // Got full page, there might be more - estimate conservatively
+                setTotalItems((currentPage - 1) * itemsPerPage + docs.length);
+            }
         } catch (error: any) {
             console.error('Failed to load documents:', error);
-            if (error.message.includes('Not authenticated') ||
+            if (error.message.includes('BANNED') || error.message.includes('suspended')) {
+                router.push('/banned');
+            } else if (error.message.includes('Not authenticated') ||
                 error.message.includes('401') ||
                 error.message.includes('Unauthorized')) {
                 router.push('/login?expired=true');
@@ -212,7 +245,7 @@ export default function DocumentsPage() {
     return (
         <>
             {/* Header Section */}
-            <section className="relative py-8 px-6 lg:px-12 overflow-hidden">
+            <section className="relative py-8 px-4 lg:px-8 overflow-hidden">
                 {/* Grid background */}
                 <div className="absolute inset-0" style={{
                     backgroundImage: `linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px)`,
@@ -254,7 +287,7 @@ export default function DocumentsPage() {
             </section>
 
             {/* Toolbar */}
-            <section className="px-6 lg:px-12 mb-8">
+            <section className="px-4 lg:px-8 mb-8">
                 <div>
                     <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800 backdrop-blur-xl">
                         {/* Search Bar */}
@@ -306,11 +339,132 @@ export default function DocumentsPage() {
                             </div>
                         </div>
                     </div>
+
+                    {/* Advanced Filters */}
+                    <div className="mt-4">
+                        <AdvancedFilters
+                            filters={advancedFilters}
+                            onFilterChange={setAdvancedFilters}
+                            onClear={() => {
+                                setAdvancedFilters({});
+                                setCurrentPage(1);
+                            }}
+                        />
+                    </div>
+                </div>
+            </section>
+
+            {/* Improved Pagination - Always Visible */}
+            <section className="px-4 lg:px-8 mb-8">
+                <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-5">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        {/* Document Count */}
+                        <div className="text-sm text-slate-400">
+                            Showing <span className="text-emerald-400 font-semibold">{((currentPage - 1) * itemsPerPage) + 1}</span> to <span className="text-emerald-400 font-semibold">{Math.min(currentPage * itemsPerPage, totalItems)}</span> of <span className="text-emerald-400 font-semibold">{totalItems}</span> documents
+                        </div>
+
+                        {/* Pagination Controls */}
+                        <div className="flex items-center gap-2">
+                            {/* Previous Button */}
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                disabled={currentPage === 1}
+                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all font-medium"
+                            >
+                                Previous
+                            </button>
+
+                            {/* Page Numbers */}
+                            <div className="flex gap-1">
+                                {(() => {
+                                    const totalPages = Math.ceil(totalItems / itemsPerPage);
+                                    const pages = [];
+
+                                    // Show first page
+                                    if (currentPage > 2) {
+                                        pages.push(
+                                            <button
+                                                key={1}
+                                                onClick={() => setCurrentPage(1)}
+                                                className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-all"
+                                            >
+                                                1
+                                            </button>
+                                        );
+                                        if (currentPage > 3) {
+                                            pages.push(<span key="dots1" className="px-2 text-slate-500">...</span>);
+                                        }
+                                    }
+
+                                    // Show current page and neighbors
+                                    for (let i = Math.max(1, currentPage - 1); i <= Math.min(totalPages, currentPage + 1); i++) {
+                                        pages.push(
+                                            <button
+                                                key={i}
+                                                onClick={() => setCurrentPage(i)}
+                                                className={`w-10 h-10 rounded-lg transition-all font-medium ${i === currentPage
+                                                    ? 'bg-emerald-500 text-black'
+                                                    : 'bg-slate-800 hover:bg-slate-700 text-white'
+                                                    }`}
+                                            >
+                                                {i}
+                                            </button>
+                                        );
+                                    }
+
+                                    // Show last page
+                                    if (currentPage < totalPages - 1) {
+                                        if (currentPage < totalPages - 2) {
+                                            pages.push(<span key="dots2" className="px-2 text-slate-500">...</span>);
+                                        }
+                                        pages.push(
+                                            <button
+                                                key={totalPages}
+                                                onClick={() => setCurrentPage(totalPages)}
+                                                className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-all"
+                                            >
+                                                {totalPages}
+                                            </button>
+                                        );
+                                    }
+
+                                    return pages;
+                                })()}
+                            </div>
+
+                            {/* Next Button */}
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalItems / itemsPerPage), prev + 1))}
+                                disabled={currentPage >= Math.ceil(totalItems / itemsPerPage)}
+                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all font-medium"
+                            >
+                                Next
+                            </button>
+                        </div>
+
+                        {/* Items Per Page Selector */}
+                        <div className="flex items-center gap-2 text-sm">
+                            <span className="text-slate-400">Per page:</span>
+                            <select
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                                className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            >
+                                <option value="5">5</option>
+                                <option value="10">10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
             </section>
 
             {/* Documents Grid/List */}
-            <section className="px-6 lg:px-12 pb-20">
+            <section className="px-4 lg:px-8 pb-20">
                 <div>
                     {filteredDocuments.length === 0 ? (
                         <motion.div
@@ -430,18 +584,19 @@ export default function DocumentsPage() {
                                                 </p>
                                             </div>
 
-                                            {/* Actions - Fixed to stay within card */}
-                                            <div className="flex gap-2">
+                                            {/* Actions */}
+                                            <div className="flex flex-wrap gap-2">
                                                 {(doc.verificationStatus === 'pending' || doc.verificationStatus === 'flagged') &&
                                                     (userRole === 'verifier' || userRole === 'admin') && (
                                                         <motion.button
                                                             whileHover={{ scale: 1.05 }}
                                                             whileTap={{ scale: 0.95 }}
                                                             onClick={() => handleReview(doc)}
-                                                            className="px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 transition-colors flex items-center justify-center"
+                                                            className={`${viewMode === 'list' ? 'px-3 py-2' : 'p-2'} rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20 transition-colors flex items-center gap-2`}
                                                             title="Review"
                                                         >
                                                             <UserCheck className="w-4 h-4" />
+                                                            {viewMode === 'list' && <span className="text-sm">Review</span>}
                                                         </motion.button>
                                                     )}
 
@@ -449,10 +604,11 @@ export default function DocumentsPage() {
                                                     whileHover={{ scale: 1.05 }}
                                                     whileTap={{ scale: 0.95 }}
                                                     onClick={() => handleView(doc)}
-                                                    className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors flex items-center justify-center"
+                                                    className={`${viewMode === 'list' ? 'px-3 py-2' : 'p-2'} rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors flex items-center gap-2`}
                                                     title="View"
                                                 >
                                                     <Eye className="w-4 h-4" />
+                                                    {viewMode === 'list' && <span className="text-sm">View</span>}
                                                 </motion.button>
 
                                                 {/* Share Button - Show for verified/analyzed docs */}
@@ -461,31 +617,46 @@ export default function DocumentsPage() {
                                                         whileHover={{ scale: 1.05 }}
                                                         whileTap={{ scale: 0.95 }}
                                                         onClick={() => setShareModal({ open: true, doc })}
-                                                        className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-colors flex items-center justify-center"
+                                                        className={`${viewMode === 'list' ? 'px-3 py-2' : 'p-2'} rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-colors flex items-center gap-2`}
                                                         title="Share"
                                                     >
                                                         <Link2 className="w-4 h-4" />
+                                                        {viewMode === 'list' && <span className="text-sm">Share</span>}
                                                     </motion.button>
                                                 )}
+
+                                                {/* Edit Category Button */}
+                                                <motion.button
+                                                    whileHover={{ scale: 1.05 }}
+                                                    whileTap={{ scale: 0.95 }}
+                                                    onClick={() => setCategoryModal({ open: true, doc })}
+                                                    className={`${viewMode === 'list' ? 'px-3 py-2' : 'p-2'} rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 transition-colors flex items-center gap-2`}
+                                                    title="Edit Category"
+                                                >
+                                                    <Tag className="w-4 h-4" />
+                                                    {viewMode === 'list' && <span className="text-sm">Tag</span>}
+                                                </motion.button>
 
                                                 <motion.button
                                                     whileHover={{ scale: 1.05 }}
                                                     whileTap={{ scale: 0.95 }}
                                                     onClick={() => handleDownload(doc)}
-                                                    className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition-colors flex items-center justify-center"
+                                                    className={`${viewMode === 'list' ? 'px-3 py-2' : 'p-2'} rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition-colors flex items-center gap-2`}
                                                     title="Download"
                                                 >
                                                     <Download className="w-4 h-4" />
+                                                    {viewMode === 'list' && <span className="text-sm">Download</span>}
                                                 </motion.button>
 
                                                 <motion.button
                                                     whileHover={{ scale: 1.05 }}
                                                     whileTap={{ scale: 0.95 }}
                                                     onClick={() => handleDelete(doc)}
-                                                    className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors flex items-center justify-center"
+                                                    className={`${viewMode === 'list' ? 'px-3 py-2' : 'p-2'} rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-2`}
                                                     title="Delete"
                                                 >
                                                     <Trash2 className="w-4 h-4" />
+                                                    {viewMode === 'list' && <span className="text-sm">Delete</span>}
                                                 </motion.button>
                                             </div>
 
@@ -508,19 +679,113 @@ export default function DocumentsPage() {
                 </div>
             </section>
 
-            {/* Pagination */}
-            <section className="px-6 lg:px-12 mb-8">
-                <Pagination
-                    currentPage={currentPage}
-                    totalPages={Math.ceil(totalItems / itemsPerPage)}
-                    totalItems={totalItems}
-                    itemsPerPage={itemsPerPage}
-                    onPageChange={(page) => setCurrentPage(page)}
-                    onItemsPerPageChange={(perPage) => {
-                        setItemsPerPage(perPage);
-                        setCurrentPage(1);
-                    }}
-                />
+            {/* Improved Pagination - Always Visible */}
+            <section className="px-4 lg:px-8 mb-8">
+                <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-5">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        {/* Document Count */}
+                        <div className="text-sm text-slate-400">
+                            Showing <span className="text-emerald-400 font-semibold">{((currentPage - 1) * itemsPerPage) + 1}</span> to <span className="text-emerald-400 font-semibold">{Math.min(currentPage * itemsPerPage, totalItems)}</span> of <span className="text-emerald-400 font-semibold">{totalItems}</span> documents
+                        </div>
+
+                        {/* Pagination Controls */}
+                        <div className="flex items-center gap-2">
+                            {/* Previous Button */}
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                disabled={currentPage === 1}
+                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all font-medium"
+                            >
+                                Previous
+                            </button>
+
+                            {/* Page Numbers */}
+                            <div className="flex gap-1">
+                                {(() => {
+                                    const totalPages = Math.ceil(totalItems / itemsPerPage);
+                                    const pages = [];
+
+                                    // Show first page
+                                    if (currentPage > 2) {
+                                        pages.push(
+                                            <button
+                                                key={1}
+                                                onClick={() => setCurrentPage(1)}
+                                                className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-all"
+                                            >
+                                                1
+                                            </button>
+                                        );
+                                        if (currentPage > 3) {
+                                            pages.push(<span key="dots1" className="px-2 text-slate-500">...</span>);
+                                        }
+                                    }
+
+                                    // Show current page and neighbors
+                                    for (let i = Math.max(1, currentPage - 1); i <= Math.min(totalPages, currentPage + 1); i++) {
+                                        pages.push(
+                                            <button
+                                                key={i}
+                                                onClick={() => setCurrentPage(i)}
+                                                className={`w-10 h-10 rounded-lg transition-all font-medium ${i === currentPage
+                                                    ? 'bg-emerald-500 text-black'
+                                                    : 'bg-slate-800 hover:bg-slate-700 text-white'
+                                                    }`}
+                                            >
+                                                {i}
+                                            </button>
+                                        );
+                                    }
+
+                                    // Show last page
+                                    if (currentPage < totalPages - 1) {
+                                        if (currentPage < totalPages - 2) {
+                                            pages.push(<span key="dots2" className="px-2 text-slate-500">...</span>);
+                                        }
+                                        pages.push(
+                                            <button
+                                                key={totalPages}
+                                                onClick={() => setCurrentPage(totalPages)}
+                                                className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-all"
+                                            >
+                                                {totalPages}
+                                            </button>
+                                        );
+                                    }
+
+                                    return pages;
+                                })()}
+                            </div>
+
+                            {/* Next Button */}
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalItems / itemsPerPage), prev + 1))}
+                                disabled={currentPage >= Math.ceil(totalItems / itemsPerPage)}
+                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all font-medium"
+                            >
+                                Next
+                            </button>
+                        </div>
+
+                        {/* Items Per Page Selector */}
+                        <div className="flex items-center gap-2 text-sm">
+                            <span className="text-slate-400">Per page:</span>
+                            <select
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                                className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            >
+                                <option value="5">5</option>
+                                <option value="10">10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             {/* Modals */}
@@ -550,6 +815,16 @@ export default function DocumentsPage() {
                 isOpen={shareModal.open}
                 document={shareModal.doc}
                 onClose={() => setShareModal({ open: false, doc: null })}
+            />
+
+            <EditCategoryModal
+                isOpen={categoryModal.open}
+                document={categoryModal.doc}
+                onClose={() => setCategoryModal({ open: false, doc: null })}
+                onSuccess={() => {
+                    loadDocuments();  // Reload documents after category update
+                    setCategoryModal({ open: false, doc: null });
+                }}
             />
         </>
     );

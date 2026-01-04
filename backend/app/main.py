@@ -3,7 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import connect_to_mongo, close_mongo_connection
-from app.api import auth, documents, ai, download, bulk_upload, verification, batch_verification, manual_review, preview, certificates, notification_preferences, test_email, shares, public_shares, verifier
+from app.api import (
+    auth, documents, bulk_upload, download, verification,
+    batch_verification, preview, manual_review, certificates,
+    notification_preferences, test_email, ai, shares, public_shares, verifier, analytics, category, admin
+)
 
 # Lifespan event handler
 @asynccontextmanager
@@ -60,6 +64,9 @@ app.include_router(ai.router)
 app.include_router(shares.router)
 app.include_router(public_shares.router)
 app.include_router(verifier.router)
+app.include_router(analytics.router)
+app.include_router(category.router)
+app.include_router(admin.router)
 
 # Health check
 @app.get("/")

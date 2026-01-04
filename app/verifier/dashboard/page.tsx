@@ -29,8 +29,11 @@ export default function VerifierDashboard() {
         try {
             const data = await apiClient.getVerifierStats();
             setStats(data);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to load stats:', error);
+            if (error.message && (error.message.includes('BANNED') || error.message.includes('suspended'))) {
+                window.location.href = '/banned';
+            }
         } finally {
             setLoading(false);
         }

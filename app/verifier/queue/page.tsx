@@ -39,8 +39,11 @@ export default function VerifierDashboard() {
             setStats(statsData);
             setQueue(queueData.documents);
             setTotalPages(queueData.pages);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to load verifier data:', error);
+            if (error.message && (error.message.includes('BANNED') || error.message.includes('suspended'))) {
+                window.location.href = '/banned';
+            }
         } finally {
             setLoading(false);
         }
@@ -98,7 +101,7 @@ export default function VerifierDashboard() {
     }
 
     return (
-        <div className="p-3 sm:p-4 md:p-6 lg:p-8">
+        <div className="px-4 lg:px-8 py-6">
             <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">

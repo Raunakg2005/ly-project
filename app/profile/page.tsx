@@ -8,6 +8,8 @@ import { apiClient } from '@/lib/api/client';
 import LoadingScreen from '@/components/animations/LoadingScreen';
 import EditProfileModal from '@/components/profile/EditProfileModal';
 import ChangePasswordModal from '@/components/profile/ChangePasswordModal';
+import Sidebar from '@/components/layout/Sidebar';
+import BanOverlay from '@/components/auth/BanOverlay';
 
 export default function ProfilePage() {
     const router = useRouter();
@@ -16,6 +18,7 @@ export default function ProfilePage() {
     const [mounted, setMounted] = useState(false);
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+    const [stats, setStats] = useState({ totalDocuments: 0, verified: 0 });
 
     useEffect(() => {
         setMounted(true);
@@ -24,6 +27,7 @@ export default function ProfilePage() {
     useEffect(() => {
         if (!mounted) return; // Wait for client-side mount
         loadUser();
+        loadStats();
     }, [mounted, router]);
 
     const loadUser = async () => {
@@ -49,6 +53,14 @@ export default function ProfilePage() {
                 errorMessage.includes('401') ||
                 errorMessage.includes('Unauthorized') ||
                 errorMessage.includes('Session expired');
+            
+            const isBanned = errorMessage.includes('BANNED') || errorMessage.includes('suspended');
+
+            if (isBanned) {
+                console.log('🚫 User is banned, redirecting to banned page...');
+                router.push('/banned');
+                return;
+            }
 
             if (isAuthError) {
                 console.log('🔄 Redirecting to login due to auth error...');
@@ -64,6 +76,19 @@ export default function ProfilePage() {
             });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadStats = async () => {
+        try {
+            const documents = await apiClient.getDocuments();
+            const verified = documents.filter((d: any) => d.verificationStatus === 'verified').length;
+            setStats({
+                totalDocuments: documents.length,
+                verified: verified
+            });
+        } catch (error) {
+            console.error('Failed to load stats:', error);
         }
     };
 
@@ -99,9 +124,9 @@ export default function ProfilePage() {
     }
 
     return (
-        <div className="flex min-h-screen bg-slate-950">
-
-            <main className="flex-1">
+        <div className="min-h-screen bg-slate-950">
+            <Sidebar />
+            <main className="lg:pl-72">
                 <section className="relative py-16 px-4 overflow-hidden">
                     <div className="absolute inset-0" style={{
                         backgroundImage: `linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px)`,
@@ -215,11 +240,11 @@ export default function ProfilePage() {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
                                         <p className="text-sm text-slate-400 mb-1">Documents Uploaded</p>
-                                        <p className="text-2xl font-bold text-white">0</p>
+                                        <p className="text-2xl font-bold text-white">{stats.totalDocuments}</p>
                                     </div>
                                     <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-                                        <p className="text-sm text-slate-400 mb-1">Verifications</p>
-                                        <p className="text-2xl font-bold text-white">0</p>
+                                        <p className="text-sm text-slate-400 mb-1">Verified Documents</p>
+                                        <p className="text-2xl font-bold text-white">{stats.verified}</p>
                                     </div>
                                 </div>
                             </div>
@@ -253,6 +278,7 @@ export default function ProfilePage() {
                 onChangePassword={handleChangePassword}
                 onCancel={() => setPasswordModalOpen(false)}
             />
+            <BanOverlay />
         </div>
     );
 }

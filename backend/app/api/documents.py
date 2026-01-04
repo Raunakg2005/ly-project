@@ -185,6 +185,15 @@ async def list_documents(
     search: Optional[str] = None,
     status_filter: Optional[str] = None,
     date_range: Optional[str] = None,
+    
+    # Advanced filters
+    file_type: Optional[str] = None,
+    category: Optional[str] = None,
+    min_size: Optional[int] = None,
+    max_size: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    
     sort_by: str = "createdAt",
     sort_order: str = "desc",
     page: int = 1,
@@ -220,8 +229,43 @@ async def list_documents(
     if status_filter and status_filter != "all":
         query["verificationStatus"] = status_filter
     
-    # Add date range filter
-    if date_range and date_range != "all":
+    # File type filter
+    if file_type and file_type != "all":
+        if file_type == "pdf":
+            query["fileType"] = {"$regex": "pdf", "$options": "i"}
+        elif file_type == "image":
+            query["fileType"] = {"$regex": "image", "$options": "i"}
+    
+    # Category filter
+    if category and category != "all":
+        query["metadata.category"] = category
+    
+    # File size range filter
+    if min_size is not None or max_size is not None:
+        size_query = {}
+        if min_size is not None:
+            size_query["$gte"] = min_size
+        if max_size is not None:
+            size_query["$lte"] = max_size
+        query["fileSize"] = size_query
+    
+    # Custom date range (takes precedence over quick date range)
+    if start_date or end_date:
+        date_query = {}
+        if start_date:
+            try:
+                date_query["$gte"] = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            except:
+                pass
+        if end_date:
+            try:
+                date_query["$lte"] = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            except:
+                pass
+        if date_query:
+            query["createdAt"] = date_query
+    # Quick date range filter (if custom dates not specified)
+    elif date_range and date_range != "all":
         now = datetime.utcnow()
         date_map = {
             "last7": now - timedelta(days=7),

@@ -140,10 +140,57 @@ async def manual_review(
                 "verificationStatus": new_status,
                 "updatedAt": datetime.utcnow()
             },
-            "$push": {"review_history": review_entry},  # Add to review_history array
+            "$push": {"review_history": review_entry},
             "$inc": {"verificationCount": 1}
         }
     )
+    
+    # Send email notification to document owner
+    try:
+        # Import here to avoid circular dependency
+        from app.services.email_service import email_service
+        
+        # Get document owner
+        doc_owner = await db.users.find_one({"_id": document.get("userId")})
+        
+        if doc_owner and doc_owner.get("email"):
+            owner_email = doc_owner["email"]
+            owner_name = doc_owner.get("name", "User")
+            
+            # Select email template based on decision
+            if review.decision == "approved":
+                html = email_service.get_document_verified_template(
+                    user_name=owner_name,
+                    document_name=document["fileName"]
+                )
+                subject = "✅ Document Verified - DocShield"
+            elif review.decision == "rejected":
+                html = email_service.get_document_rejected_template(
+                    user_name=owner_name,
+                    document_name=document["fileName"],
+                    reviewer_notes=review.verifier_notes or "No specific reason provided.",
+                    reviewer_name=reviewer_name
+                )
+                subject = "❌ Document Rejected - DocShield"
+            else:  # flagged
+                html = email_service.get_document_flagged_template(
+                    user_name=owner_name,
+                    document_name=document["fileName"],
+                    reviewer_notes=review.verifier_notes or "Document requires additional review.",
+                    reviewer_name=reviewer_name
+                )
+                subject = "⚠️ Document Flagged - DocShield"
+            
+            # Send email asynchronously (don't block on failure)
+            await email_service.send_email(
+                to=owner_email,
+                subject=subject,
+                html=html
+            )
+            print(f"📧 Email notification sent to {owner_email}")
+    except Exception as email_error:
+        # Log error but don't fail the review
+        print(f"⚠️ Failed to send email notification: {email_error}")
     
     return {
         "success": True,

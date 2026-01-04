@@ -6,13 +6,13 @@ router = APIRouter(prefix="/api/test", tags=["testing"])
 
 class TestEmailRequest(BaseModel):
     to_email: EmailStr
-    test_type: str = "verified"  # verified or certificate
+    test_type: str = "verified"  # verified, certificate, rejected, or flagged
 
 @router.post("/send-email")
 async def test_send_email(request: TestEmailRequest):
     """
     Test endpoint to send notification emails.
-    test_type: 'verified' or 'certificate'
+    test_type: 'verified', 'certificate', 'rejected', or 'flagged'
     """
     try:
         if request.test_type == "verified":
@@ -28,8 +28,27 @@ async def test_send_email(request: TestEmailRequest):
                 certificate_id="CERT-TEST123"
             )
             subject = "🏆 Certificate Ready - DocShield"
+        elif request.test_type == "rejected":
+            html = email_service.get_document_rejected_template(
+                user_name="Test User",
+                document_name="test_document.pdf",
+                reviewer_notes="The document quality is too low and the signature is missing.",
+                reviewer_name="John Verifier"
+            )
+            subject = "❌ Document Rejected - DocShield"
+        elif request.test_type == "flagged":
+            html = email_service.get_document_flagged_template(
+                user_name="Test User",
+                document_name="test_document.pdf",
+                reviewer_notes="Missing required information. Please provide additional documentation.",
+                reviewer_name="John Verifier"
+            )
+            subject = "⚠️ Document Flagged - DocShield"
         else:
-            raise HTTPException(status_code=400, detail="Invalid test_type. Use 'verified' or 'certificate'")
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid test_type. Use 'verified', 'certificate', 'rejected', or 'flagged'"
+            )
         
         success = await email_service.send_email(
             to=request.to_email,

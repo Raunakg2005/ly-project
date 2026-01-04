@@ -64,6 +64,27 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
             detail="User not found"
         )
     
+    # Check if password was changed after token was issued
+    token_pwd_changed_at = payload.get("pwd_changed_at")
+    user_pwd_changed_at = user.get("password_changed_at")
+    
+    if user_pwd_changed_at:
+        from datetime import datetime
+        user_pwd_time = user_pwd_changed_at.isoformat() if isinstance(user_pwd_changed_at, datetime) else str(user_pwd_changed_at)
+        
+        if token_pwd_changed_at != user_pwd_time:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired due to password change. Please login again."
+            )
+    
+    # Check if user is banned
+    if user.get("banned", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been suspended"
+        )
+    
     return str(user["_id"])
 
 

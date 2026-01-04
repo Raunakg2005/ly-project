@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
 import Sidebar from '@/components/layout/Sidebar';
 import LoadingScreen from '@/components/animations/LoadingScreen';
+import BanOverlay from '@/components/auth/BanOverlay';
 
 export default function DashboardLayout({
     children,
@@ -57,11 +58,12 @@ export default function DashboardLayout({
     }
 
     return (
-        <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900">
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900">
             <Sidebar />
-            <main className="flex-1">
+            <main className="lg:pl-72">
                 {children}
             </main>
+            <BanOverlay />
         </div>
     );
 }

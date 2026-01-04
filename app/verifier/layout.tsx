@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
 import Sidebar from '@/components/layout/Sidebar';
 import LoadingScreen from '@/components/animations/LoadingScreen';
+import BanOverlay from '@/components/auth/BanOverlay';
 
 export default function VerifierProtectedLayout({
     children,
@@ -63,6 +64,7 @@ export default function VerifierProtectedLayout({
             <main className="lg:pl-72">
                 {children}
             </main>
+            <BanOverlay />
         </div>
     );
 }

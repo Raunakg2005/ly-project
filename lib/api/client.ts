@@ -36,6 +36,12 @@ export const apiClient = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password }),
         });
+        
+        if (res.status === 403) {
+            const error = await res.json();
+            throw new Error(error.detail || 'Account suspended');
+        }
+        
         if (!res.ok) throw new Error('Login failed');
         const data = await res.json();
         this.setToken(data.access_token);
@@ -43,7 +49,7 @@ export const apiClient = {
     },
 
 
-    async getCurrentUser(): Promise<{ id: string; email: string; name: string; role: string }> {
+    async getCurrentUser(): Promise<{ id: string; email: string; name: string; role: string; banned?: boolean }> {
         const token = this.getToken();
         if (!token) throw new Error('Not authenticated');
 
@@ -54,6 +60,11 @@ export const apiClient = {
         if (res.status === 401) {
             this.removeToken(); // Clear invalid token
             throw new Error('401: Session expired. Please login again.');
+        }
+        
+        if (res.status === 403) {
+            const error = await res.json();
+            throw new Error('BANNED: ' + (error.detail || 'Account suspended'));
         }
 
         if (!res.ok) throw new Error('Failed to get user');
@@ -133,6 +144,12 @@ export const apiClient = {
         sort_order?: string;
         page?: number;
         limit?: number;
+        file_type?: string;
+        category?: string;
+        min_size?: number;
+        max_size?: number;
+        start_date?: string;
+        end_date?: string;
     }) {
         const token = this.getToken();
         if (!token) throw new Error('Not authenticated');
@@ -146,9 +163,15 @@ export const apiClient = {
         if (params?.sort_order) queryParams.append('sort_order', params.sort_order);
         if (params?.page) queryParams.append('page', params.page.toString());
         if (params?.limit) queryParams.append('limit', params.limit.toString());
+        if (params?.file_type) queryParams.append('file_type', params.file_type);
+        if (params?.category) queryParams.append('category', params.category);
+        if (params?.min_size !== undefined) queryParams.append('min_size', params.min_size.toString());
+        if (params?.max_size !== undefined) queryParams.append('max_size', params.max_size.toString());
+        if (params?.start_date) queryParams.append('start_date', params.start_date);
+        if (params?.end_date) queryParams.append('end_date', params.end_date);
 
         const queryString = queryParams.toString();
-        const url = `${API_BASE_URL}/api/documents/${queryString ? `?${queryString}` : ''}`;
+        const url = `${API_BASE_URL}/api/documents${queryString ? `?${queryString}` : ''}`;
 
         const res = await fetch(url, {
             headers: { 'Authorization': `Bearer ${token}` },
@@ -185,6 +208,23 @@ export const apiClient = {
         });
 
         if (!res.ok) throw new Error('Failed to delete document');
+        return res.json();
+    },
+
+    async updateDocumentCategory(documentId: string, category: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+
+        const res = await fetch(`${API_BASE_URL}/api/documents/${documentId}/category`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ category })
+        });
+
+        if (!res.ok) throw new Error('Failed to update category');
         return res.json();
     },
 
@@ -460,11 +500,11 @@ export const apiClient = {
         return response.json();
     },
 
-    // Verifier APIs
     async getVerifierDocuments(params?: {
         search?: string;
         status_filter?: string;
         date_range?: string;
+        show_deleted?: boolean;
         sort_by?: string;
         sort_order?: string;
         page?: number;
@@ -478,6 +518,7 @@ export const apiClient = {
         if (params?.search) queryParams.append('search', params.search);
         if (params?.status_filter) queryParams.append('status_filter', params.status_filter);
         if (params?.date_range) queryParams.append('date_range', params.date_range);
+        if (params?.show_deleted !== undefined) queryParams.append('show_deleted', params.show_deleted.toString());
         if (params?.sort_by) queryParams.append('sort_by', params.sort_by);
         if (params?.sort_order) queryParams.append('sort_order', params.sort_order);
         if (params?.page) queryParams.append('page', params.page.toString());
@@ -557,6 +598,102 @@ export const apiClient = {
         });
         if (!response.ok) throw new Error('Failed to fetch review history');
         return response.json();
+    },
+
+    // ===== ADMIN API =====
+    async getAdminStats() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/admin/stats`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to get admin stats');
+        return res.json();
+    },
+
+    async getAdminUsers(params?: { search?: string; role?: string; status?: string; page?: number; limit?: number; }) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const queryParams = new URLSearchParams();
+        if (params?.search) queryParams.append('search', params.search);
+        if (params?.role) queryParams.append('role', params.role);
+        if (params?.status) queryParams.append('status', params.status);
+        if (params?.page) queryParams.append('page', params.page.toString());
+        if (params?.limit) queryParams.append('limit', params.limit.toString());
+        const queryString = queryParams.toString();
+        const url = `${API_BASE_URL}/api/admin/users${queryString ? `?${queryString}` : ''}`;
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) throw new Error('Failed to get users');
+        return res.json();
+    },
+
+    async updateUserRole(userId: string, role: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/role`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ role })
+        });
+        if (!res.ok) throw new Error('Failed to update role');
+        return res.json();
+    },
+
+    async updateUserStatus(userId: string, status: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ status })
+        });
+        if (!res.ok) throw new Error('Failed to update status');
+        return res.json();
+    },
+
+    async deleteUserAdmin(userId: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to delete user');
+        return res.json();
+    },
+
+    async createUser(data: { name: string; email: string; password: string; role: string }) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+
+        const res = await fetch(`${API_BASE_URL}/api/admin/users`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(data)
+        });
+
+        if (!res.ok) throw new Error('Failed to create user');
+        return res.json();
+    },
+
+    async resetUserPassword(userId: string, newPassword: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+
+        const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/password`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ new_password: newPassword })
+        });
+
+        if (!res.ok) throw new Error('Failed to reset password');
+        return res.json();
     }
 
 };

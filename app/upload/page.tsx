@@ -7,6 +7,7 @@ import { Shield, CheckCircle, AlertCircle, ArrowRight } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import Sidebar from '@/components/layout/Sidebar';
 import DropZone from '@/components/upload/DropZone';
+import BanOverlay from '@/components/auth/BanOverlay';
 
 export default function UploadPage() {
     const router = useRouter();
@@ -42,6 +43,13 @@ export default function UploadPage() {
                     });
                 } catch (err: any) {
                     const errorMessage = err.message || 'Upload failed';
+                    
+                    // Check for banned status
+                    if (errorMessage.includes('BANNED') || errorMessage.includes('suspended')) {
+                        router.push('/banned');
+                        return;
+                    }
+                    
                     const isDuplicate = errorMessage.includes('Duplicate') || errorMessage.includes('already exists');
 
                     results.push({
@@ -70,9 +78,9 @@ export default function UploadPage() {
     };
 
     return (
-        <div className="flex min-h-screen bg-slate-950">
+        <div className="min-h-screen bg-slate-950">
             <Sidebar />
-            <main className="flex-1 p-4 lg:p-8">
+            <main className="lg:pl-72 p-4 lg:p-8">
                 {/* Header */}
                 <section className="relative py-8 px-4 mb-8">
                     <div className="absolute inset-0" style={{
@@ -247,6 +255,7 @@ export default function UploadPage() {
                     </motion.div>
                 </section>
             </main>
+            <BanOverlay />
         </div>
     );
 }

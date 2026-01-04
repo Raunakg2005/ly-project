@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { Bell, Mail, Shield, CheckCircle, XCircle, AlertTriangle, Award, BarChart3, Loader2, RotateCcw } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import Sidebar from '@/components/layout/Sidebar';
+import BanOverlay from '@/components/auth/BanOverlay';
 
 interface NotificationPreferences {
     user_id: string;
@@ -36,8 +37,11 @@ export default function SettingsPage() {
         try {
             const prefs = await apiClient.getNotificationPreferences();
             setPreferences(prefs);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to load preferences:', error);
+            if (error.message && (error.message.includes('BANNED') || error.message.includes('suspended'))) {
+                window.location.href = '/banned';
+            }
         } finally {
             setLoading(false);
         }
@@ -258,6 +262,7 @@ export default function SettingsPage() {
                     )}
                 </div>
             </div>
+            <BanOverlay />
         </>
     );
 }
