@@ -6,7 +6,8 @@ from app.database import connect_to_mongo, close_mongo_connection
 from app.api import (
     auth, documents, bulk_upload, download, verification,
     batch_verification, preview, manual_review, certificates,
-    notification_preferences, test_email, ai, shares, public_shares, verifier, analytics, category, admin
+    notification_preferences, test_email, ai, shares, public_shares, verifier, analytics, category, admin,
+    two_factor, api_keys
 )
 
 # Lifespan event handler
@@ -67,6 +68,8 @@ app.include_router(verifier.router)
 app.include_router(analytics.router)
 app.include_router(category.router)
 app.include_router(admin.router)
+app.include_router(two_factor.router)
+app.include_router(api_keys.router)
 
 # Health check
 @app.get("/")

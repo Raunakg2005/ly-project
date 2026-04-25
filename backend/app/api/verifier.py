@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, List
 from bson import ObjectId
 from datetime import datetime, timedelta
+import pymongo
 
 from app.core.security import decode_access_token
 from app.database import get_database
@@ -189,9 +190,9 @@ async def get_verifier_stats(current_user: dict = Depends(get_current_user_with_
     """Get verifier statistics"""
     db = get_database()
     
-    # Count pending documents (pending + flagged) - exclude deleted
+    # Count pending documents (pending + flagged + analyzed) - exclude deleted
     pending_count = await db.documents.count_documents({
-        "verificationStatus": {"$in": ["pending", "flagged"]},
+        "verificationStatus": {"$in": ["pending", "flagged", "analyzed"]},
         "$or": [{"isDeleted": {"$exists": False}}, {"isDeleted": False}]
     })
     
@@ -253,7 +254,10 @@ async def get_review_queue(
     query = {"$or": [{"isDeleted": {"$exists": False}}, {"isDeleted": False}]}
     
     if status_filter == "all":
-        query["verificationStatus"] = {"$in": ["pending", "flagged"]}
+        # Include analyzed docs so verifiers can see AI-processed documents
+        query["verificationStatus"] = {"$in": ["pending", "flagged", "analyzed"]}
+    elif status_filter == "pending":
+        query["verificationStatus"] = {"$in": ["pending", "analyzed"]}
     else:
         query["verificationStatus"] = status_filter
     
@@ -300,6 +304,31 @@ async def get_review_queue(
                     "reviewed_at": review.get("reviewed_at").isoformat() if review.get("reviewed_at") else None
                 })
         
+        # Serialize AI analysis if present
+        ai_analysis = doc.get("aiAnalysis")
+        serialized_ai = None
+        if ai_analysis:
+            serialized_ai = {
+                "authenticityScore": ai_analysis.get("authenticityScore"),
+                "riskLevel": ai_analysis.get("riskLevel"),
+                "flags": ai_analysis.get("flags", []),
+                "summary": ai_analysis.get("summary", ""),
+                "confidence": ai_analysis.get("confidence"),
+                "analysisDate": ai_analysis["analysisDate"].isoformat() if ai_analysis.get("analysisDate") else None
+            }
+
+        # Serialize phishing analysis if present
+        phishing_raw = doc.get("phishingAnalysis")
+        serialized_phishing = None
+        if phishing_raw:
+            serialized_phishing = {
+                "urlsFound": phishing_raw.get("urlsFound", 0),
+                "threatLevel": phishing_raw.get("threatLevel", "none"),
+                "highRiskCount": phishing_raw.get("highRiskCount", 0),
+                "summary": phishing_raw.get("summary", ""),
+                "threats": phishing_raw.get("threats", [])
+            }
+
         result_docs.append({
             "id": str(doc["_id"]),
             "file_name": doc["fileName"],
@@ -307,7 +336,11 @@ async def get_review_queue(
             "file_type": doc["fileType"],
             "verification_status": doc["verificationStatus"],
             "uploaded_at": doc["createdAt"].isoformat(),
-            "reviewHistory": serialized_reviews,  # Add review history
+            "reviewHistory": serialized_reviews,
+            "ai_analysis": serialized_ai,
+            "phishing_analysis": serialized_phishing,
+            "signature_valid": doc.get("signatureValid"),
+            "extraction_warning": doc.get("extractionWarning"),
             "user": {
                 "id": str(user["_id"]) if user else None,
                 "name": user.get("name", "Unknown") if user else "Unknown",
@@ -343,8 +376,8 @@ async def quick_review(
             detail="Document not found"
         )
     
-    # Check if already reviewed
-    if document["verificationStatus"] not in ["pending", "flagged"]:
+    # Check if already reviewed (analyzed is still awaiting human review)
+    if document["verificationStatus"] not in ["pending", "flagged", "analyzed"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Document already reviewed"
@@ -424,3 +457,132 @@ async def get_review_history(
         "total": total,
         "page": page
     }
+
+
+# ─────────────────────────────────────────────
+# Automated Queue Endpoints
+# ─────────────────────────────────────────────
+
+@router.post("/queue/assign")
+async def assign_next_from_queue(
+    current_user: dict = Depends(get_current_user_with_role)
+):
+    """
+    Atomically claims the oldest pending/flagged unassigned document for this verifier.
+    Uses findOneAndUpdate to prevent two verifiers grabbing the same document.
+    """
+    db = get_database()
+    verifier_id = ObjectId(current_user["id"])
+    now = datetime.utcnow()
+
+    # Atomic: find the oldest unassigned (or stale-assigned) pending doc
+    # A document is considered stale if assigned >30 minutes ago with no review
+    stale_cutoff = now - timedelta(minutes=30)
+
+    query = {
+        "verificationStatus": {"$in": ["pending", "flagged"]},
+        "$or": [{"isDeleted": {"$exists": False}}, {"isDeleted": False}],
+        "$or": [
+            {"assigned_to": {"$exists": False}},
+            {"assigned_to": None},
+            {"assigned_at": {"$lt": stale_cutoff}}
+        ]
+    }
+
+    updated_doc = await db.documents.find_one_and_update(
+        query,
+        {"$set": {"assigned_to": verifier_id, "assigned_at": now}},
+        sort=[("createdAt", pymongo.ASCENDING)],
+        return_document=True
+    )
+
+    if not updated_doc:
+        return {"assigned": False, "message": "No documents available in queue"}
+
+    # Enrich with user info
+    owner = await db.users.find_one({"_id": updated_doc.get("userId")})
+
+    return {
+        "assigned": True,
+        "document": {
+            "id": str(updated_doc["_id"]),
+            "file_name": updated_doc.get("fileName", "Unknown"),
+            "file_size": updated_doc.get("fileSize", 0),
+            "file_type": updated_doc.get("fileType", "unknown"),
+            "verification_status": updated_doc.get("verificationStatus", "pending"),
+            "uploaded_at": updated_doc["createdAt"].isoformat() if updated_doc.get("createdAt") else None,
+            "user": {
+                "id": str(owner["_id"]) if owner else None,
+                "name": owner.get("name", "Unknown") if owner else "Unknown",
+                "email": owner.get("email", "") if owner else ""
+            }
+        }
+    }
+
+
+@router.get("/queue/my-queue")
+async def get_my_queue(
+    current_user: dict = Depends(get_current_user_with_role)
+):
+    """Returns documents currently assigned to this verifier."""
+    db = get_database()
+    verifier_id = ObjectId(current_user["id"])
+
+    docs = await db.documents.find({
+        "assigned_to": verifier_id,
+        "verificationStatus": {"$in": ["pending", "flagged"]},
+        "$or": [{"isDeleted": {"$exists": False}}, {"isDeleted": False}]
+    }).sort("assigned_at", pymongo.ASCENDING).to_list(length=50)
+
+    result = []
+    for doc in docs:
+        owner = await db.users.find_one({"_id": doc.get("userId")})
+        assigned_at = doc.get("assigned_at")
+        # Calculate how long they've held this assignment
+        held_minutes = int((datetime.utcnow() - assigned_at).total_seconds() / 60) if assigned_at else 0
+
+        result.append({
+            "id": str(doc["_id"]),
+            "file_name": doc.get("fileName", "Unknown"),
+            "file_size": doc.get("fileSize", 0),
+            "file_type": doc.get("fileType", "unknown"),
+            "verification_status": doc.get("verificationStatus", "pending"),
+            "uploaded_at": doc["createdAt"].isoformat() if doc.get("createdAt") else None,
+            "assigned_at": assigned_at.isoformat() if assigned_at else None,
+            "held_minutes": held_minutes,
+            "user": {
+                "id": str(owner["_id"]) if owner else None,
+                "name": owner.get("name", "Unknown") if owner else "Unknown",
+                "email": owner.get("email", "") if owner else ""
+            }
+        })
+
+    return {"documents": result, "total": len(result)}
+
+
+@router.post("/queue/release/{document_id}")
+async def release_assignment(
+    document_id: str,
+    current_user: dict = Depends(get_current_user_with_role)
+):
+    """Release a document assignment so another verifier can pick it up."""
+    db = get_database()
+    verifier_id = ObjectId(current_user["id"])
+
+    doc = await db.documents.find_one({"_id": ObjectId(document_id)})
+
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    if doc.get("assigned_to") != verifier_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This document is not assigned to you"
+        )
+
+    await db.documents.update_one(
+        {"_id": ObjectId(document_id)},
+        {"$unset": {"assigned_to": "", "assigned_at": ""}}
+    )
+
+    return {"success": True, "message": "Document released back to queue"}

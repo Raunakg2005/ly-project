@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from datetime import timedelta
+from datetime import datetime, timedelta
+from jose import jwt as jose_jwt
 from app.schemas.user import UserCreate, UserLogin, Token, User
 from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from app.database import get_database
@@ -37,7 +38,7 @@ async def register(user: UserCreate):
     
     return created_user
 
-@router.post("/login", response_model=Token)
+@router.post("/login")
 async def login(credentials: UserLogin):
     """Login user and return JWT token"""
     db = get_database()
@@ -74,6 +75,24 @@ async def login(credentials: UserLogin):
         expires_delta=access_token_expires
     )
     
+    # Check if user has 2FA enabled
+    if user.get("two_fa_enabled", False):
+        # Issue a short-lived pre-auth token instead of the full JWT
+        pre_auth_token = jose_jwt.encode(
+            {
+                "sub": user["email"],
+                "type": "pre_auth",
+                "exp": datetime.utcnow() + timedelta(minutes=5)
+            },
+            settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM
+        )
+        return {
+            "requires_2fa": True,
+            "pre_auth_token": pre_auth_token,
+            "token_type": "bearer"
+        }
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=User)

@@ -4,27 +4,31 @@ import io
 
 async def extract_pdf_text(file_content: bytes) -> dict:
     """
-    Extract text from PDF file
-    Returns: {text, page_count, metadata}
+    Extract text from PDF.
+    - Text-based PDFs: direct PyPDF2 extraction
+    - Scanned PDFs (image-only): falls back to pdf2image + Tesseract OCR
     """
     try:
-        # Create PDF reader from bytes
         pdf_file = io.BytesIO(file_content)
         reader = PdfReader(pdf_file)
-        
-        # Get metadata
+
         page_count = len(reader.pages)
         metadata = reader.metadata if reader.metadata else {}
-        
-        # Extract text from all pages
+
+        # Try direct text extraction first
         text_parts = []
         for page in reader.pages:
             text = page.extract_text()
-            if text:
-                text_parts.append(text)
-        
+            if text and text.strip():
+                text_parts.append(text.strip())
+
         full_text = "\n\n".join(text_parts)
-        
+
+        # If text is too short, this is likely a scanned PDF — use OCR fallback
+        if len(full_text.strip()) < 50:
+            print("📄 Scanned PDF detected — falling back to OCR")
+            return await _ocr_pdf_fallback(file_content, page_count, metadata)
+
         return {
             "text": full_text,
             "page_count": page_count,
@@ -37,7 +41,7 @@ async def extract_pdf_text(file_content: bytes) -> dict:
             "success": True,
             "method": "pdf"
         }
-    
+
     except Exception as e:
         return {
             "text": "",
@@ -47,6 +51,67 @@ async def extract_pdf_text(file_content: bytes) -> dict:
             "error": str(e),
             "method": "pdf"
         }
+
+async def _ocr_pdf_fallback(file_content: bytes, page_count: int, metadata: dict) -> dict:
+    """
+    Render PDF pages to images using PyMuPDF (no system deps) then OCR with Tesseract.
+    Works on any deployment — no Poppler required.
+    """
+    try:
+        import fitz  # PyMuPDF
+        import pytesseract
+        from PIL import Image
+        import io
+
+        doc = fitz.open(stream=file_content, filetype="pdf")
+        text_parts = []
+        confidences = []
+
+        for page in doc:
+            # Render page to image at 200 DPI (scale factor ~2.78)
+            mat = fitz.Matrix(200 / 72, 200 / 72)
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_bytes))
+
+            text = pytesseract.image_to_string(img)
+            if text.strip():
+                text_parts.append(text.strip())
+
+            # Gather confidence
+            data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+            confs = [int(c) for c in data['conf'] if c != '-1' and int(c) >= 0]
+            if confs:
+                confidences.append(sum(confs) / len(confs))
+
+        doc.close()
+        full_text = "\n\n".join(text_parts)
+        avg_confidence = round(sum(confidences) / len(confidences), 1) if confidences else 0.0
+
+        return {
+            "text": full_text,
+            "page_count": page_count,
+            "metadata": {
+                "author": metadata.get("/Author", "Unknown"),
+                "title": metadata.get("/Title", ""),
+                "subject": metadata.get("/Subject", ""),
+                "creator": metadata.get("/Creator", ""),
+            },
+            "ocr_confidence": avg_confidence,
+            "success": True,
+            "method": "ocr_pdf"
+        }
+
+    except ImportError as e:
+        print(f"⚠️ Missing dependency for scanned PDF OCR: {e} — run: pip install pymupdf pytesseract")
+        return {"text": "", "page_count": page_count, "metadata": {}, "success": False,
+                "method": "ocr_pdf", "error": str(e)}
+    except Exception as e:
+        print(f"❌ PDF OCR fallback error: {e}")
+        return {"text": "", "page_count": page_count, "metadata": {}, "success": False,
+                "method": "ocr_pdf", "error": str(e)}
+
+
 
 async def extract_image_text(file_content: bytes) -> dict:
     """

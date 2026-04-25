@@ -36,7 +36,11 @@ yarn-error.log*
 
 # vercel
 .vercel
-
+/submission
+/backend/test_phishing.py
+/backend/benchmark_report.txt
+LITERATURE_SURVEY.md
+generate_ppt.py
 # typescript
 *.tsbuildinfo
 next-env.d.ts

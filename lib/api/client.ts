@@ -44,6 +44,12 @@ export const apiClient = {
         
         if (!res.ok) throw new Error('Login failed');
         const data = await res.json();
+
+        // Handle 2FA: don't set token yet, return the full response
+        if (data.requires_2fa) {
+            return data; // { requires_2fa: true, pre_auth_token: string }
+        }
+
         this.setToken(data.access_token);
         return data;
     },
@@ -694,6 +700,278 @@ export const apiClient = {
 
         if (!res.ok) throw new Error('Failed to reset password');
         return res.json();
-    }
+    },
+
+    // ===== AUTOMATED QUEUE =====
+    async assignFromQueue() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/verifier/queue/assign`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to assign document');
+        return res.json();
+    },
+
+    async getMyQueue() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/verifier/queue/my-queue`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch my queue');
+        return res.json();
+    },
+
+    async releaseAssignment(documentId: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/verifier/queue/release/${documentId}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to release document');
+        return res.json();
+    },
+
+    // ===== TWO-FACTOR AUTHENTICATION =====
+    async get2FAStatus() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/status`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to get 2FA status');
+        return res.json() as Promise<{ two_fa_enabled: boolean; backup_codes_remaining: number; enabled_at: string | null }>;
+    },
+
+    async setup2FA(): Promise<{ secret: string; qr_code: string; message: string }> {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/setup`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to setup 2FA');
+        return res.json();
+    },
+
+    async enable2FA(code: string): Promise<{ success: boolean; backup_codes: string[] }> {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/enable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to enable 2FA');
+        }
+        return res.json();
+    },
+
+    async verify2FA(preAuthToken: string, code: string): Promise<{ access_token: string; token_type: string }> {
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pre_auth_token: preAuthToken, code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Invalid code');
+        }
+        const data = await res.json();
+        this.setToken(data.access_token);
+        return data;
+    },
+
+    async disable2FA(code: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/disable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to disable 2FA');
+        }
+        return res.json();
+    },
+
+    async regenerateBackupCodes(code: string): Promise<{ backup_codes: string[] }> {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/backup-codes/regenerate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to regenerate backup codes');
+        }
+        return res.json();
+    },
+
+    // ===== API KEY MANAGEMENT =====
+    async createApiKey(name: string, expiresInDays?: number) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/keys`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ name, expires_in_days: expiresInDays ?? null })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to create API key');
+        }
+        return res.json();
+    },
+
+    async getApiKeys() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/keys`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch API keys');
+        return res.json() as Promise<{ keys: Array<{ id: string; name: string; key_prefix: string; created_at: string; last_used: string | null; expires_at: string | null; is_active: boolean; is_expired: boolean }>, total: number }>;
+    },
+
+    async revokeApiKey(keyId: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/keys/${keyId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to revoke API key');
+        return res.json();
+    },
+
+    // ===== TWO-FACTOR AUTHENTICATION =====
+
+    async get2FAStatus() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/status`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch 2FA status');
+        return res.json() as Promise<{ two_fa_enabled: boolean; backup_codes_remaining: number; enabled_at: string | null }>;
+    },
+
+    async setup2FA() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/setup`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to start 2FA setup');
+        }
+        return res.json() as Promise<{ secret: string; qr_code: string; message: string }>;
+    },
+
+    async enable2FA(code: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/enable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to enable 2FA');
+        }
+        return res.json() as Promise<{ success: boolean; backup_codes: string[]; warning: string }>;
+    },
+
+    async verify2FA(preAuthToken: string, code: string) {
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pre_auth_token: preAuthToken, code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Invalid authentication code');
+        }
+        const data = await res.json();
+        this.setToken(data.access_token);
+        return data;
+    },
+
+    async disable2FA(code: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/disable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to disable 2FA');
+        }
+        return res.json();
+    },
+
+    async regenerateBackupCodes(code: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/auth/2fa/backup-codes/regenerate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ code })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to regenerate backup codes');
+        }
+        return res.json() as Promise<{ backup_codes: string[]; warning: string }>;
+    },
+
+    // ===== QUEUE SYSTEM =====
+
+    async assignFromQueue() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/verifier/queue/assign`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to claim document');
+        return res.json();
+    },
+
+    async getMyQueue() {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/verifier/queue/my-queue`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch queue');
+        return res.json();
+    },
+
+    async releaseAssignment(documentId: string) {
+        const token = this.getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(`${API_BASE_URL}/api/verifier/queue/release/${documentId}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to release document');
+        return res.json();
+    },
 
 };

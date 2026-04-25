@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import List, Optional
 from bson import ObjectId
@@ -10,6 +10,7 @@ from app.database import get_database
 from app.services.file_manager import file_manager
 from app.services.text_extractor import extract_text
 from app.services.signing_service import signing_service
+from app.services.document_analyzer import document_analyzer
 from app.config import settings
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
@@ -45,8 +46,99 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
     
     return str(user["_id"])
 
+async def run_ai_analysis(document_id: str, text: str, file_name: str, file_type: str):
+    """Background task: signature verify + phishing scan + AI analysis"""
+    from app.services.signing_service import signing_service
+    from app.services.phishing_detector import scan_document_for_threats
+    import asyncio
+    db = get_database()
+
+    # --- 1. Re-verify the digital signature ---
+    doc = await db.documents.find_one({"_id": ObjectId(document_id)})
+    signature_valid = False
+    if doc:
+        sig = doc.get("quantumSignature")
+        file_hash = doc.get("fileHash")
+        if sig and file_hash:
+            signature_valid = signing_service.verify_signature(file_hash, sig)
+            print(f"{'✅' if signature_valid else '❌'} Signature integrity: {signature_valid} for {document_id}")
+
+    # --- 2. Guard against empty text ---
+    if not text or len(text.strip()) < 30:
+        await db.documents.update_one(
+            {"_id": ObjectId(document_id)},
+            {"$set": {
+                "signatureValid": signature_valid,
+                "extractionWarning": "Insufficient text extracted — document may be image-only or empty",
+                "updatedAt": datetime.utcnow()
+            }}
+        )
+        print(f"⚠️ Skipping analysis for {document_id} — text too short ({len(text.strip())} chars)")
+        return
+
+    # --- 3. Run Phishing Scan + AI Analysis concurrently ---
+    try:
+        phishing_task = scan_document_for_threats(text)
+        ai_task = document_analyzer.analyze_document(
+            extracted_text=text,
+            file_name=file_name,
+            file_type=file_type
+        )
+        phishing_result, analysis_result = await asyncio.gather(phishing_task, ai_task)
+
+        print(f"🔍 Phishing scan: {phishing_result['overall_threat_level']} threat — {phishing_result['urls_found']} URLs found")
+
+        # Build phishing data to store
+        phishing_data = {
+            "urlsFound": phishing_result["urls_found"],
+            "threatLevel": phishing_result["overall_threat_level"],
+            "highRiskCount": phishing_result["high_risk_count"],
+            "threats": phishing_result["threats"][:10],  # cap at 10 entries
+            "summary": phishing_result["summary"],
+            "scannedAt": datetime.utcnow()
+        }
+
+        update_fields = {
+            "signatureValid": signature_valid,
+            "phishingAnalysis": phishing_data,
+            "updatedAt": datetime.utcnow()
+        }
+
+        if analysis_result.get("success"):
+            # Lower AI authenticity score if high phishing risk
+            ai_score = analysis_result["authenticityScore"]
+            if phishing_result["overall_threat_level"] == "high":
+                ai_score = min(ai_score, 40)
+                analysis_result["flags"].append("⚠️ High-risk URLs detected in document")
+            elif phishing_result["overall_threat_level"] == "medium":
+                ai_score = min(ai_score, 65)
+
+            ai_data = {
+                "authenticityScore": ai_score,
+                "riskLevel": analysis_result["riskLevel"],
+                "flags": analysis_result["flags"],
+                "summary": analysis_result.get("summary", ""),
+                "analysisDate": datetime.utcnow(),
+                "confidence": analysis_result["confidence"],
+                "processingTime": analysis_result["processingTime"]
+            }
+            update_fields["aiAnalysis"] = ai_data
+            update_fields["verificationStatus"] = "analyzed"
+            print(f"✅ AI Analysis complete for {document_id} — score: {ai_score}")
+        else:
+            print(f"⚠️ AI Analysis failed for {document_id}: {analysis_result.get('error')}")
+
+        await db.documents.update_one(
+            {"_id": ObjectId(document_id)},
+            {"$set": update_fields}
+        )
+
+    except Exception as e:
+        print(f"❌ Error in run_ai_analysis: {e}")
+
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -113,7 +205,19 @@ async def upload_document(
         
         # Extract text
         extracted_text = await extract_text(file_content, file.content_type)
-        
+
+        # Reject if no readable text could be extracted
+        if not extracted_text or len(extracted_text.strip()) < 30:
+            file_manager.delete_file(file_path)  # clean up saved file
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Could not read any text from this file. "
+                    "Please upload a clear, readable document (not a blurry scan or blank page). "
+                    "Supported formats: text-based PDF, JPG, PNG with visible text, DOCX."
+                )
+            )
+
         # Generate digital signature
         signature = signing_service.sign_hash(file_hash)
         
@@ -156,6 +260,16 @@ async def upload_document(
         # Insert into database
         db = get_database()
         result = await db.documents.insert_one(document)
+        doc_id = str(result.inserted_id)
+        
+        # Add AI analysis to background tasks
+        background_tasks.add_task(
+            run_ai_analysis,
+            doc_id,
+            extracted_text,
+            file.filename,
+            file.content_type
+        )
         
         # Return response
         return UploadResponse(

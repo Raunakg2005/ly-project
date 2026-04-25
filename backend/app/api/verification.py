@@ -151,10 +151,10 @@ async def request_verification(
         )
     
     # Auto-analyze if not already analyzed
-    if not document.get("aiAnalysis"):
-        # Trigger analysis
+    fresh_analysis = document.get("aiAnalysis")
+    if not fresh_analysis:
         extracted_text = document.get("extractedText", "")
-        if extracted_text:
+        if extracted_text and len(extracted_text.strip()) >= 30:
             start_time = time.time()
             analysis = await document_analyzer.analyze_document(
                 extracted_text=extracted_text,
@@ -164,19 +164,23 @@ async def request_verification(
             )
             analysis["processingTime"] = time.time() - start_time
             analysis["analyzedAt"] = datetime.utcnow()
-            
+            fresh_analysis = analysis
+
             # Save analysis
             await db.documents.update_one(
                 {"_id": ObjectId(request.document_id)},
                 {"$set": {"aiAnalysis": analysis}}
             )
-    
-    # Update verification status
+
+    # Determine status from fresh analysis (not stale document object)
+    score = (fresh_analysis or {}).get("authenticityScore", 0)
+    new_status = "analyzed" if fresh_analysis else "pending"
+
     await db.documents.update_one(
         {"_id": ObjectId(request.document_id)},
         {
             "$set": {
-                "verificationStatus": "verified" if document.get("aiAnalysis", {}).get("authenticityScore", 0) > 70 else "pending_review",
+                "verificationStatus": new_status,
                 "verificationCount": document.get("verificationCount", 0) + 1,
                 "updatedAt": datetime.utcnow()
             }

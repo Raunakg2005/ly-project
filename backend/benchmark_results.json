@@ -1,0 +1,175 @@
+{
+  "generated_at": "2026-04-25T15:09:05.206743",
+  "iterations": 100,
+  "rsa": {
+    "algorithm": "RSA-2048 + PSS + SHA-256",
+    "iterations": 100,
+    "keygen_ms": 38.917,
+    "sign_mean_ms": 0.571,
+    "sign_min_ms": 0.387,
+    "sign_max_ms": 5.587,
+    "sign_stdev_ms": 0.549,
+    "verify_mean_ms": 0.025,
+    "verify_min_ms": 0.02,
+    "verify_max_ms": 0.1,
+    "signature_size_bytes": 256,
+    "throughput_signs_per_sec": 1750.3
+  },
+  "dilithium": {
+    "algorithm": "CRYSTALS-Dilithium3 (NIST PQC Standard)",
+    "source": "Estimated from NIST PQC benchmark literature",
+    "iterations": 0,
+    "keygen_ms": 0.082,
+    "sign_mean_ms": 0.121,
+    "verify_mean_ms": 0.093,
+    "signature_size_bytes": 3293,
+    "public_key_size_bytes": 1952,
+    "throughput_signs_per_sec": 8264,
+    "note": "NOT MEASURED \u2014 install pqcrypto to run live benchmark"
+  },
+  "phishing": {
+    "total_cases": 10,
+    "correct": 9,
+    "accuracy_pct": 90.0,
+    "within_one_level_pct": 90.0,
+    "avg_scan_time_ms": 0.07,
+    "cases": [
+      {
+        "label": "Brand spoof + login keyword",
+        "expected": "high",
+        "detected": "high",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.13
+      },
+      {
+        "label": "IP host + phishing keywords",
+        "expected": "high",
+        "detected": "high",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.36
+      },
+      {
+        "label": "URL shortener",
+        "expected": "medium",
+        "detected": "medium",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.05
+      },
+      {
+        "label": "Legitimate URL",
+        "expected": "none",
+        "detected": "none",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.03
+      },
+      {
+        "label": "Suspicious TLD + keywords",
+        "expected": "high",
+        "detected": "high",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.04
+      },
+      {
+        "label": "No URLs",
+        "expected": "none",
+        "detected": "none",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.0
+      },
+      {
+        "label": "Legitimate Microsoft URL",
+        "expected": "none",
+        "detected": "medium",
+        "correct": false,
+        "within_one_level": false,
+        "time_ms": 0.04
+      },
+      {
+        "label": "Brand spoof + suspicious TLD",
+        "expected": "high",
+        "detected": "high",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.03
+      },
+      {
+        "label": "Generic clean URL",
+        "expected": "none",
+        "detected": "none",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.03
+      },
+      {
+        "label": "Multiple signals",
+        "expected": "high",
+        "detected": "high",
+        "correct": true,
+        "within_one_level": true,
+        "time_ms": 0.03
+      }
+    ]
+  },
+  "ai_analysis": {
+    "total_cases": 4,
+    "risk_accuracy_pct": 75.0,
+    "score_accuracy_pct": 100.0,
+    "avg_latency_ms": 603.2,
+    "cases": [
+      {
+        "label": "Legitimate internship certificate",
+        "score": 85.0,
+        "risk_detected": "low",
+        "risk_expected": "low",
+        "risk_correct": true,
+        "score_correct": true,
+        "time_ms": 642.5,
+        "flags": []
+      },
+      {
+        "label": "Suspicious document with phishing link",
+        "score": 20.0,
+        "risk_detected": "high",
+        "risk_expected": "high",
+        "risk_correct": true,
+        "score_correct": true,
+        "time_ms": 811.4,
+        "flags": [
+          "Suspicious URL",
+          "Urgency tactic",
+          "Request for sensitive information"
+        ]
+      },
+      {
+        "label": "Professional cover letter",
+        "score": 90.0,
+        "risk_detected": "low",
+        "risk_expected": "low",
+        "risk_correct": true,
+        "score_correct": true,
+        "time_ms": 434.3,
+        "flags": []
+      },
+      {
+        "label": "Blank/garbage document",
+        "score": 20.0,
+        "risk_detected": "high",
+        "risk_expected": "medium",
+        "risk_correct": false,
+        "score_correct": true,
+        "time_ms": 524.5,
+        "flags": [
+          "inconsistent and nonsensical content",
+          "lack of meaningful information",
+          "unusual character patterns"
+        ]
+      }
+    ]
+  }
+}

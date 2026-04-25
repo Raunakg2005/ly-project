@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Shield, Mail, Lock, User, Loader2, AlertCircle } from 'lucide-react';
+import { Shield, Mail, Lock, User, Loader2, AlertCircle, Smartphone, ArrowLeft } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 
 export default function AuthPage() {
@@ -11,6 +11,11 @@ export default function AuthPage() {
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    // 2FA state
+    const [twoFAStep, setTwoFAStep] = useState(false);
+    const [preAuthToken, setPreAuthToken] = useState('');
+    const [twoFACode, setTwoFACode] = useState('');
 
     useEffect(() => {
         // Check if session expired
@@ -25,6 +30,17 @@ export default function AuthPage() {
         name: '',
     });
 
+    const redirectByRole = (token: string) => {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const userRole = payload.role || 'user';
+        localStorage.setItem('userRole', userRole);
+        if (userRole === 'verifier' || userRole === 'admin') {
+            window.location.href = '/verifier/dashboard';
+        } else {
+            window.location.href = '/dashboard';
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
@@ -34,45 +50,43 @@ export default function AuthPage() {
             if (isLogin) {
                 const response = await apiClient.login(formData.email, formData.password);
 
-                // Decode token to get user role
-                const payload = JSON.parse(atob(response.access_token.split('.')[1]));
-                const userRole = payload.role || 'user';
-
-                // Store role in localStorage
-                localStorage.setItem('userRole', userRole);
-
-                // Redirect based on role using window.location for reliable navigation
-                if (userRole === 'verifier' || userRole === 'admin') {
-                    window.location.href = '/verifier/dashboard';
-                } else {
-                    window.location.href = '/dashboard';
+                // Check for 2FA requirement
+                if (response.requires_2fa) {
+                    setPreAuthToken(response.pre_auth_token);
+                    setTwoFAStep(true);
+                    setLoading(false);
+                    return;
                 }
+
+                redirectByRole(response.access_token);
             } else {
                 await apiClient.register({ name: formData.name, email: formData.email, password: formData.password });
                 const response = await apiClient.login(formData.email, formData.password);
-
-                // Decode token to get user role
-                const payload = JSON.parse(atob(response.access_token.split('.')[1]));
-                const userRole = payload.role || 'user';
-
-                // Store role in localStorage
-                localStorage.setItem('userRole', userRole);
-
-                // Redirect based on role
-                if (userRole === 'verifier' || userRole === 'admin') {
-                    window.location.href = '/verifier/dashboard';
-                } else {
-                    window.location.href = '/dashboard';
-                }
+                // New accounts can't have 2FA yet
+                redirectByRole(response.access_token);
             }
         } catch (err: any) {
             const errorMsg = err.message || 'Authentication failed';
             if (errorMsg.includes('Account suspended')) {
-                // Redirect to banned page
                 window.location.href = '/banned';
                 return;
             }
             setError(errorMsg);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleVerify2FA = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!twoFACode.trim()) return;
+        setError('');
+        setLoading(true);
+        try {
+            const response = await apiClient.verify2FA(preAuthToken, twoFACode);
+            redirectByRole(response.access_token);
+        } catch (err: any) {
+            setError(err.message || 'Invalid code');
         } finally {
             setLoading(false);
         }
@@ -106,6 +120,49 @@ export default function AuthPage() {
 
                 {/* Auth Card */}
                 <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800/50 rounded-2xl shadow-2xl p-8">
+
+                    {/* 2FA Step */}
+                    {twoFAStep ? (
+                        <form onSubmit={handleVerify2FA} className="space-y-5">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+                                    <Smartphone className="h-5 w-5 text-emerald-400" />
+                                </div>
+                                <div>
+                                    <h2 className="text-white font-semibold">Two-Factor Authentication</h2>
+                                    <p className="text-xs text-slate-400">Enter the code from your authenticator app</p>
+                                </div>
+                            </div>
+
+                            <input
+                                type="text"
+                                autoFocus
+                                value={twoFACode}
+                                onChange={e => setTwoFACode(e.target.value.replace(/\s/g, '').slice(0, 8))}
+                                placeholder="000000"
+                                className="w-full text-center text-3xl tracking-[0.6em] font-mono bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                            />
+
+                            {error && (
+                                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400 flex items-center gap-2">
+                                    <AlertCircle className="w-4 h-4 shrink-0" />{error}
+                                </div>
+                            )}
+
+                            <p className="text-xs text-slate-500 text-center">Lost your device? Use one of your backup codes</p>
+
+                            <button type="submit" disabled={loading || !twoFACode}
+                                className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white rounded-lg hover:shadow-lg hover:shadow-emerald-500/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2 font-medium">
+                                {loading ? <><Loader2 className="h-5 w-5 animate-spin" /> Verifying...</> : 'Verify Code'}
+                            </button>
+
+                            <button type="button" onClick={() => { setTwoFAStep(false); setTwoFACode(''); setError(''); }}
+                                className="w-full text-sm text-slate-400 hover:text-white transition-colors flex items-center justify-center gap-1">
+                                <ArrowLeft className="w-3.5 h-3.5" /> Back to login
+                            </button>
+                        </form>
+                    ) : (
+                    <>
                     {/* Toggle */}
                     <div className="flex gap-2 mb-6 bg-slate-800/50 p-1 rounded-lg">
                         <button
@@ -210,6 +267,8 @@ export default function AuthPage() {
                             )}
                         </button>
                     </form>
+                    </>
+                    )}
 
                     {/* Test Credentials */}
                     <div className="mt-6 space-y-3">
